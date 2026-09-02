@@ -3,7 +3,6 @@ require("dotenv").config();
 const fs = require("fs");
 const path = require("path");
 
-
 const {
   removePresaleForProduct,
   getProductByCode,
@@ -31,8 +30,6 @@ const BASELINE_FILE = path.join(
   "real-stock-baseline.json"
 );
 
-
-
 const REAL_WAREHOUSE_PATTERN =
   /^\d{1,2}-\d{1,2}-[A-Za-z]-\d{1,2}$/;
 
@@ -51,9 +48,7 @@ function log(type, msg) {
     msg,
   };
 
-  console.log(
-    `[${type.toUpperCase()}] ${msg}`
-  );
+  console.log(`[${type.toUpperCase()}] ${msg}`);
 
   try {
     fs.appendFileSync(
@@ -176,147 +171,9 @@ function isExcludedBySupplier(product) {
 
   return EXCLUDED_SUPPLIERS.some(
     (excluded) =>
-      supplier ===
-      excluded.toLowerCase()
+      supplier === excluded.toLowerCase()
   );
 }
-
-// ========================================================
-// OAUTH
-// ========================================================
-
-// const oauth = new OAuth({
-//   consumer: {
-//     key:
-//       process.env.TRADEVINE_CONSUMER_KEY,
-//     secret:
-//       process.env.TRADEVINE_CONSUMER_SECRET,
-//   },
-
-//   signature_method:
-//     "HMAC-SHA1",
-
-//   hash_function(
-//     baseString,
-//     key
-//   ) {
-//     return crypto
-//       .createHmac(
-//         "sha1",
-//         key
-//       )
-//       .update(baseString)
-//       .digest("base64");
-//   },
-// });
-
-// function getTradevineHeaders(
-//   method,
-//   url
-// ) {
-//   return oauth.toHeader(
-//     oauth.authorize(
-//       {
-//         url,
-//         method,
-//       },
-//       {
-//         key:
-//           process.env.TRADEVINE_ACCESS_TOKEN,
-//         secret:
-//           process.env.TRADEVINE_ACCESS_TOKEN_SECRET,
-//       }
-//     )
-//   );
-// }
-
-// ========================================================
-// TRADEVINE API
-// ========================================================
-
-// async function apiGet(url) {
-//   const headers =
-//     getTradevineHeaders(
-//       "GET",
-//       url
-//     );
-
-//   const response =
-//     await fetch(url, {
-//       method: "GET",
-//       headers: {
-//         ...headers,
-//         Accept:
-//           "application/json",
-//       },
-//     });
-
-//   const text =
-//     await response.text();
-
-//   if (!response.ok) {
-//     throw new Error(
-//       `Tradevine GET ${response.status}: ${text}`
-//     );
-//   }
-
-//   return text
-//     ? JSONbig.parse(text)
-//     : null;
-// }
-
-// ========================================================
-// GET PRODUCT
-// ========================================================
-
-// async function getProductByCode(
-//   productCode
-// ) {
-//   const url =
-//     `${TV_API}/v1/Product` +
-//     `?code=${encodeURIComponent(
-//       productCode
-//     )}`;
-
-//   const result =
-//     await apiGet(url);
-
-//   if (
-//     Array.isArray(result)
-//   ) {
-//     return result[0] || null;
-//   }
-
-//   if (
-//     Array.isArray(
-//       result?.Items
-//     )
-//   ) {
-//     return (
-//       result.Items[0] ||
-//       null
-//     );
-//   }
-
-//   if (
-//     Array.isArray(
-//       result?.Results
-//     )
-//   ) {
-//     return (
-//       result.Results[0] ||
-//       null
-//     );
-//   }
-
-//   if (
-//     result?.Code
-//   ) {
-//     return result;
-//   }
-
-//   return null;
-// }
 
 // ========================================================
 // ACTIVE CYCLES
@@ -329,42 +186,28 @@ function getActiveCycles(state) {
   // Standalone products
   // ------------------------------------------------------
 
-  for (
-    const key of Object.keys(state)
-  ) {
-    if (
-      !key.startsWith(
-        "title:"
-      )
-    ) {
+  for (const key of Object.keys(state)) {
+    if (!key.startsWith("title:")) {
       continue;
     }
 
-    const code =
-      key.replace(
-        "title:",
-        ""
-      ).trim().toUpperCase();
+    const code = key
+      .replace("title:", "")
+      .trim()
+      .toUpperCase();
 
     // BOM parent is handled separately.
-    if (
-      state[
-        `bom:${code}`
-      ]
-    ) {
+    if (state[`bom:${code}`]) {
       continue;
     }
 
-    const entry =
-      state[key];
+    const entry = state[key];
 
-    const poNumber =
-      String(
-        entry?.poNumber ||
-          ""
-      )
-        .trim()
-        .toUpperCase();
+    const poNumber = String(
+      entry?.poNumber || ""
+    )
+      .trim()
+      .toUpperCase();
 
     if (!poNumber) {
       log(
@@ -386,33 +229,23 @@ function getActiveCycles(state) {
   // BOM parents
   // ------------------------------------------------------
 
-  for (
-    const key of Object.keys(state)
-  ) {
-    if (
-      !key.startsWith(
-        "bom:"
-      )
-    ) {
+  for (const key of Object.keys(state)) {
+    if (!key.startsWith("bom:")) {
       continue;
     }
 
-    const code =
-      key.replace(
-        "bom:",
-        ""
-      ).trim().toUpperCase();
+    const code = key
+      .replace("bom:", "")
+      .trim()
+      .toUpperCase();
 
-    const entry =
-      state[key];
+    const entry = state[key];
 
-    const poNumber =
-      String(
-        entry?.poNumber ||
-          ""
-      )
-        .trim()
-        .toUpperCase();
+    const poNumber = String(
+      entry?.poNumber || ""
+    )
+      .trim()
+      .toUpperCase();
 
     if (!poNumber) {
       log(
@@ -437,27 +270,18 @@ function getActiveCycles(state) {
 // REAL WAREHOUSE SNAPSHOT
 // ========================================================
 
-function getRealWarehouseSnapshot(
-  product
-) {
+function getRealWarehouseSnapshot(product) {
   const snapshot = {};
 
   const warehouses =
-    product?.PerWarehouseInventory ||
-    [];
+    product?.PerWarehouseInventory || [];
 
-  for (
-    const warehouse of warehouses
-  ) {
-    const warehouseCode =
-      String(
-        warehouse?.WarehouseCode ||
-          ""
-      ).trim();
+  for (const warehouse of warehouses) {
+    const warehouseCode = String(
+      warehouse?.WarehouseCode || ""
+    ).trim();
 
-    if (
-      !warehouseCode
-    ) {
+    if (!warehouseCode) {
       continue;
     }
 
@@ -469,23 +293,119 @@ function getRealWarehouseSnapshot(
       continue;
     }
 
-    const quantity =
-      Number(
-        warehouse?.QuantityInStockSnapshot ??
-          warehouse?.QuantityInStock ??
-          0
-      );
+    const quantity = Number(
+      warehouse?.QuantityInStockSnapshot ??
+        warehouse?.QuantityInStock ??
+        0
+    );
 
-    snapshot[
-      warehouseCode
-    ] = Number.isFinite(
-      quantity
-    )
-      ? quantity
-      : 0;
+    snapshot[warehouseCode] =
+      Number.isFinite(quantity)
+        ? quantity
+        : 0;
   }
 
   return snapshot;
+}
+
+// ========================================================
+// BOM CHILD SNAPSHOT
+// ========================================================
+
+async function getBomChildrenSnapshot(
+  parentProduct
+) {
+  const snapshot = {};
+  const childCodes = [];
+
+  const components =
+    Array.isArray(
+      parentProduct?.BoMComponents
+    )
+      ? parentProduct.BoMComponents
+      : [];
+
+  for (const component of components) {
+    const childCode = String(
+      component?.BoMComponentProductCode ||
+        ""
+    )
+      .trim()
+      .toUpperCase();
+
+    if (!childCode) {
+      continue;
+    }
+
+    if (
+      childCodes.includes(childCode)
+    ) {
+      continue;
+    }
+
+    childCodes.push(childCode);
+  }
+
+  if (!childCodes.length) {
+    return {
+      foundAllChildren: true,
+      childCodes: [],
+      snapshot: {},
+    };
+  }
+
+  for (const childCode of childCodes) {
+    let childProduct;
+
+    try {
+      childProduct =
+        await getProductByCode(
+          childCode
+        );
+    } catch (err) {
+      log(
+        "error",
+        `${parentProduct.Code}: failed to fetch BOM child ${childCode} — ${err.message}`
+      );
+
+      return {
+        foundAllChildren: false,
+        childCodes,
+        snapshot,
+      };
+    }
+
+    if (!childProduct) {
+      log(
+        "warn",
+        `${parentProduct.Code}: BOM child ${childCode} not found`
+      );
+
+      return {
+        foundAllChildren: false,
+        childCodes,
+        snapshot,
+      };
+    }
+
+    snapshot[childCode] =
+      getRealWarehouseSnapshot(
+        childProduct
+      );
+
+    log(
+      "info",
+      `${parentProduct.Code}: BOM child ${childCode} real warehouse stock = ${JSON.stringify(
+        snapshot[childCode]
+      )}`
+    );
+  }
+
+  return {
+    foundAllChildren: true,
+    childCodes,
+    snapshot,
+  };
 }
 
 // ========================================================
@@ -496,32 +416,23 @@ function hasRealStockIncrease(
   baseline,
   current
 ) {
-  const warehouses =
-    new Set([
-      ...Object.keys(
-        baseline || {}
-      ),
-      ...Object.keys(
-        current || {}
-      ),
-    ]);
+  const warehouses = new Set([
+    ...Object.keys(
+      baseline || {}
+    ),
+    ...Object.keys(
+      current || {}
+    ),
+  ]);
 
-  for (
-    const warehouseCode of warehouses
-  ) {
-    const oldQty =
-      Number(
-        baseline?.[
-          warehouseCode
-        ] ?? 0
-      );
+  for (const warehouseCode of warehouses) {
+    const oldQty = Number(
+      baseline?.[warehouseCode] ?? 0
+    );
 
-    const newQty =
-      Number(
-        current?.[
-          warehouseCode
-        ] ?? 0
-      );
+    const newQty = Number(
+      current?.[warehouseCode] ?? 0
+    );
 
     // New warehouse stock
     if (
@@ -538,7 +449,7 @@ function hasRealStockIncrease(
       };
     }
 
-    // Quantity increased
+    // Existing warehouse quantity increased
     if (
       newQty > oldQty
     ) {
@@ -559,6 +470,54 @@ function hasRealStockIncrease(
 }
 
 // ========================================================
+// BOM STOCK CHANGE DETECTION
+// ========================================================
+
+function hasBomRealStockIncrease(
+  baseline,
+  current
+) {
+  const childCodes = new Set([
+    ...Object.keys(
+      baseline || {}
+    ),
+    ...Object.keys(
+      current || {}
+    ),
+  ]);
+
+  for (const childCode of childCodes) {
+    const previousSnapshot =
+      baseline?.[childCode] || {};
+
+    const currentSnapshot =
+      current?.[childCode] || {};
+
+    const change =
+      hasRealStockIncrease(
+        previousSnapshot,
+        currentSnapshot
+      );
+
+    if (change.changed) {
+      return {
+        changed: true,
+        childCode,
+        warehouseCode:
+          change.warehouseCode,
+        oldQty: change.oldQty,
+        newQty: change.newQty,
+        reason: change.reason,
+      };
+    }
+  }
+
+  return {
+    changed: false,
+  };
+}
+
+// ========================================================
 // BASELINE KEY
 // ========================================================
 
@@ -566,13 +525,9 @@ function getBaselineKey(
   productCode,
   poNumber
 ) {
-  return `${String(
-    productCode
-  )
+  return `${String(productCode)
     .trim()
-    .toUpperCase()}::${String(
-    poNumber
-  )
+    .toUpperCase()}::${String(poNumber)
     .trim()
     .toUpperCase()}`;
 }
@@ -662,42 +617,125 @@ async function checkCycle(
     return false;
   }
 
-  // ------------------------------------------------------
-  // Current warehouse snapshot
-  // ------------------------------------------------------
-
-  const currentSnapshot =
-    getRealWarehouseSnapshot(
-      product
-    );
-
-  log(
-    "info",
-    `${code} + ${poNumber}: current real warehouse stock = ${JSON.stringify(
-      currentSnapshot
-    )}`
-  );
-
-  // ------------------------------------------------------
-  // FIRST SEEN CYCLE
-  // ------------------------------------------------------
+  // ======================================================
+  // STANDALONE PRODUCT
+  // ======================================================
 
   if (
-    !baseline[
-      baselineKey
-    ]
+    cycle.type === "standalone"
   ) {
-    baseline[
+    const currentSnapshot =
+      getRealWarehouseSnapshot(
+        product
+      );
+
+    log(
+      "info",
+      `${code} + ${poNumber}: current real warehouse stock = ${JSON.stringify(
+        currentSnapshot
+      )}`
+    );
+
+    // ----------------------------------------------------
+    // FIRST SEEN CYCLE
+    // ----------------------------------------------------
+
+    if (
+      !baseline[baselineKey]
+    ) {
+      baseline[baselineKey] = {
+        productCode: code,
+        poNumber,
+        type: cycle.type,
+        createdAt:
+          new Date().toISOString(),
+        warehouses:
+          currentSnapshot,
+      };
+
+      saveBaseline(
+        baseline
+      );
+
+      log(
+        "success",
+        `${code} + ${poNumber}: baseline created — watcher will not remove presale on this first check`
+      );
+
+      return false;
+    }
+
+    // ----------------------------------------------------
+    // COMPARE WITH BASELINE
+    // ----------------------------------------------------
+
+    const previousSnapshot =
+      baseline[
+        baselineKey
+      ].warehouses || {};
+
+    const change =
+      hasRealStockIncrease(
+        previousSnapshot,
+        currentSnapshot
+      );
+
+    if (!change.changed) {
+      log(
+        "info",
+        `${code} + ${poNumber}: no real warehouse stock increase`
+      );
+
+      return false;
+    }
+
+    // ----------------------------------------------------
+    // STOCK INCREASE DETECTED
+    // ----------------------------------------------------
+
+    log(
+      "success",
+      `${code} + ${poNumber}: ${change.reason} detected — ${change.warehouseCode}: ${change.oldQty} -> ${change.newQty}`
+    );
+
+    log(
+      "info",
+      `${code} + ${poNumber}: calling removePresaleForProduct()`
+    );
+
+    let removed;
+
+    try {
+      removed =
+        await removePresaleForProduct(
+          code,
+          poNumber
+        );
+    } catch (err) {
+      log(
+        "error",
+        `${code} + ${poNumber}: removePresaleForProduct failed — ${err.message}`
+      );
+
+      return false;
+    }
+
+    if (!removed) {
+      log(
+        "info",
+        `${code} + ${poNumber}: presale was not removed — keeping baseline/state for retry`
+      );
+
+      return false;
+    }
+
+    // ----------------------------------------------------
+    // SUCCESS
+    // ----------------------------------------------------
+
+    delete baseline[
       baselineKey
-    ] = {
-      productCode: code,
-      poNumber,
-      type: cycle.type,
-      createdAt:
-        new Date().toISOString(),
-      warehouses:
-        currentSnapshot,
-    };
+    ];
 
     saveBaseline(
       baseline
@@ -705,96 +743,176 @@ async function checkCycle(
 
     log(
       "success",
-      `${code} + ${poNumber}: baseline created — watcher will not remove presale on this first check`
+      `${code} + ${poNumber}: automatic presale removal completed`
     );
 
-    return false;
+    return true;
   }
 
-  // ------------------------------------------------------
-  // COMPARE WITH BASELINE
-  // ------------------------------------------------------
-
-  const previousSnapshot =
-    baseline[
-      baselineKey
-    ].warehouses || {};
-
-  const change =
-    hasRealStockIncrease(
-      previousSnapshot,
-      currentSnapshot
-    );
+  // ======================================================
+  // BOM PARENT
+  // ======================================================
 
   if (
-    !change.changed
+    cycle.type === "bom"
   ) {
     log(
       "info",
-      `${code} + ${poNumber}: no real warehouse stock increase`
+      `${code} + ${poNumber}: BOM parent detected — checking BOM children for real warehouse stock`
     );
 
-    return false;
-  }
-
-  // ------------------------------------------------------
-  // STOCK INCREASE DETECTED
-  // ------------------------------------------------------
-
-  log(
-    "success",
-    `${code} + ${poNumber}: ${change.reason} detected — ${change.warehouseCode}: ${change.oldQty} -> ${change.newQty}`
-  );
-
-  log(
-    "info",
-    `${code} + ${poNumber}: calling removePresaleForProduct()`
-  );
-
-  let removed;
-
-  try {
-    removed =
-      await removePresaleForProduct(
-        code,
-        poNumber
+    const bomSnapshot =
+      await getBomChildrenSnapshot(
+        product
       );
-  } catch (err) {
+
+    if (
+      !bomSnapshot.foundAllChildren
+    ) {
+      log(
+        "warn",
+        `${code} + ${poNumber}: could not build complete BOM child snapshot — skipping this check`
+      );
+
+      return false;
+    }
+
+    if (
+      !bomSnapshot.childCodes.length
+    ) {
+      log(
+        "warn",
+        `${code} + ${poNumber}: BOM has no child products — skipping watcher`
+      );
+
+      return false;
+    }
+
+    // ----------------------------------------------------
+    // FIRST SEEN BOM CYCLE
+    // ----------------------------------------------------
+
+    if (
+      !baseline[baselineKey]
+    ) {
+      baseline[baselineKey] = {
+        productCode: code,
+        poNumber,
+        type: cycle.type,
+        createdAt:
+          new Date().toISOString(),
+        children:
+          bomSnapshot.snapshot,
+      };
+
+      saveBaseline(
+        baseline
+      );
+
+      log(
+        "success",
+        `${code} + ${poNumber}: BOM child baseline created — watcher will not remove presale on this first check`
+      );
+
+      return false;
+    }
+
+    // ----------------------------------------------------
+    // COMPARE BOM CHILDREN
+    // ----------------------------------------------------
+
+    const previousSnapshot =
+      baseline[
+        baselineKey
+      ].children || {};
+
+    const change =
+      hasBomRealStockIncrease(
+        previousSnapshot,
+        bomSnapshot.snapshot
+      );
+
+    if (
+      !change.changed
+    ) {
+      log(
+        "info",
+        `${code} + ${poNumber}: no BOM child real warehouse stock increase`
+      );
+
+      return false;
+    }
+
+    // ----------------------------------------------------
+    // BOM CHILD STOCK INCREASE DETECTED
+    // ----------------------------------------------------
+
     log(
-      "error",
-      `${code} + ${poNumber}: removePresaleForProduct failed — ${err.message}`
+      "success",
+      `${code} + ${poNumber}: BOM child ${change.childCode} ${change.reason} detected — ${change.warehouseCode}: ${change.oldQty} -> ${change.newQty}`
     );
 
-    return false;
-  }
-
-  if (!removed) {
     log(
       "info",
-      `${code} + ${poNumber}: presale was not removed — keeping baseline/state for retry`
+      `${code} + ${poNumber}: calling removePresaleForProduct() for BOM parent`
     );
 
-    return false;
+    let removed;
+
+    try {
+      removed =
+        await removePresaleForProduct(
+          code,
+          poNumber
+        );
+    } catch (err) {
+      log(
+        "error",
+        `${code} + ${poNumber}: removePresaleForProduct failed — ${err.message}`
+      );
+
+      return false;
+    }
+
+    if (!removed) {
+      log(
+        "info",
+        `${code} + ${poNumber}: BOM presale was not removed — keeping baseline/state for retry`
+      );
+
+      return false;
+    }
+
+    // ----------------------------------------------------
+    // SUCCESS
+    // ----------------------------------------------------
+
+    delete baseline[
+      baselineKey
+    ];
+
+    saveBaseline(
+      baseline
+    );
+
+    log(
+      "success",
+      `${code} + ${poNumber}: automatic BOM presale removal completed`
+    );
+
+    return true;
   }
 
   // ------------------------------------------------------
-  // SUCCESS
+  // UNKNOWN TYPE
   // ------------------------------------------------------
 
-  delete baseline[
-    baselineKey
-  ];
-
-  saveBaseline(
-    baseline
-  );
-
   log(
-    "success",
-    `${code} + ${poNumber}: automatic presale removal completed`
+    "warn",
+    `${code} + ${poNumber}: unknown cycle type "${cycle.type}" — skipping`
   );
 
-  return true;
+  return false;
 }
 
 // ========================================================
@@ -894,4 +1012,5 @@ module.exports = {
   main,
   getRealWarehouseSnapshot,
   hasRealStockIncrease,
+  hasBomRealStockIncrease,
 };
