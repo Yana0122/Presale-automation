@@ -1,0 +1,97 @@
+{
+  "warehouse:PR15242-A": {
+    "warehouseCode": "Pre Order-1",
+    "date": "2026-09-01T02:55:31.824Z"
+  },
+  "inv:PO4447:PR15242-A": {
+    "done": true,
+    "date": "2026-09-01T02:55:32.209Z",
+    "supplier": "Test Supplier for Shopify"
+  },
+  "warehouse:PR15242-B": {
+    "warehouseCode": "Pre Order-2",
+    "date": "2026-09-01T02:55:32.380Z"
+  },
+  "inv:PO4447:PR15242-B": {
+    "done": true,
+    "date": "2026-09-01T02:55:32.626Z",
+    "supplier": "Test Supplier for Shopify"
+  },
+  "bom:PR15242": {
+    "done": true,
+    "poNumber": "PO4447",
+    "date": "2026-09-02T02:48:30.353Z",
+    "supplier": "Test Supplier for Shopify"
+  },
+  "title:PR15242": {
+    "done": true,
+    "poNumber": "PO4447",
+    "date": "2026-09-02T02:48:30.540Z",
+    "supplier": "Test Supplier for Shopify"
+  },
+  "warehouse:PR15241": {
+    "warehouseCode": "Pre Order-4",
+    "date": "2026-09-01T02:55:33.967Z"
+  },
+  "inv:PO4447:PR15241": {
+    "done": true,
+    "date": "2026-09-01T02:55:34.188Z",
+    "supplier": "Test Supplier for Shopify"
+  },
+  "title:PR15241": {
+    "done": true,
+    "poNumber": "PO4447",
+    "date": "2026-09-02T02:48:31.526Z",
+    "supplier": "Test Supplier for Shopify"
+  },
+  "warehouse:PR15245": {
+    "warehouseCode": "Pre Order-5",
+    "date": "2026-09-01T02:55:34.631Z"
+  },
+  "inv:PO4447:PR15245": {
+    "done": true,
+    "date": "2026-09-01T02:55:34.955Z",
+    "supplier": "Test Supplier for Shopify"
+  },
+  "blocked:PR15245": {
+    "poNumber": "PO4447",
+    "supplier": "Test Supplier for Shopify",
+    "reason": "Title exceeds 80 chars",
+    "detectedAt": "2026-09-02T02:48:31.527Z",
+    "productCode": "PR15245"
+  },
+  "inv:PO4447:PR15301": {
+    "done": true,
+    "date": "2026-09-01T02:55:35.329Z",
+    "supplier": "Test Supplier for Shopify"
+  },
+  "shopify-listed:PR15242": {
+    "done": true,
+    "date": "2026-09-02T03:49:09.835Z",
+    "note": "Product successfully listed on Shopify",
+    "shopifyProductId": "3922781652407524834"
+  },
+  "shopify-listed:PR15245": {
+    "done": true,
+    "date": "2026-09-02T03:35:47.926Z",
+    "note": "Product successfully listed on Shopify",
+    "shopifyProductId": "3922795073952178403"
+  },
+  "shopify-listed:PR15301": {
+    "done": true,
+    "date": "2026-09-02T03:49:18.505Z",
+    "note": "Product successfully listed on Shopify",
+    "shopifyProductId": "3923730468901786847"
+  },
+  "inv:PO4447:PR13374": {
+    "done": true,
+    "date": "2026-09-02T02:48:31.213Z",
+    "supplier": "Test Supplier for Shopify"
+  },
+  "shopify-listed:PR13374": {
+    "done": true,
+    "date": "2026-09-02T03:49:25.681Z",
+    "note": "Product successfully listed on Shopify",
+    "shopifyProductId": "3904465234889219277"
+  }
+}

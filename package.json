@@ -1,0 +1,21 @@
+{
+  "name": "tsb-presale-live",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "cors": "^2.8.6",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "json-bigint": "^1.0.0",
+    "oauth-1.0a": "^2.2.6",
+    "playwright": "^1.62.1"
+  }
+}

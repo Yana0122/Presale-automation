@@ -1,0 +1,9 @@
+node_modules/
+.env
+.env.*
+!.env.example
+*.log
+automation.log
+automation-orchestrator.log
+npm-debug.log*
+path-migration-backup-*/

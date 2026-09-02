@@ -1,0 +1,18 @@
+{
+  "PR15241::PO4447": {
+    "productCode": "PR15241",
+    "poNumber": "PO4447",
+    "type": "standalone",
+    "createdAt": "2026-09-02T04:52:09.542Z",
+    "warehouses": {
+      "4-35-A-3": 0
+    }
+  },
+  "PR15242::PO4447": {
+    "productCode": "PR15242",
+    "poNumber": "PO4447",
+    "type": "bom",
+    "createdAt": "2026-09-02T04:52:09.753Z",
+    "warehouses": {}
+  }
+}

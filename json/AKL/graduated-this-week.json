@@ -1,0 +1,34 @@
+[
+  {
+    "code": "PR99999",
+    "poNumber": "PO-TEST-001",
+    "date": "2026-09-01T09:00:00.000Z",
+    "store": "akl",
+    "storeName": "Auckland",
+    "note": "TEST RECORD - dashboard verification"
+  },
+  {
+    "productCode": "PR13374",
+    "productName": "DS Harsha Test",
+    "date": "2026-09-01T21:53:56.186Z",
+    "supplier": "Test Supplier for Shopify",
+    "type": "standalone",
+    "poNumber": null
+  },
+  {
+    "productCode": "PR13374",
+    "productName": "DS Harsha Test",
+    "date": "2026-09-02T04:28:01.938Z",
+    "supplier": "Test Supplier for Shopify",
+    "poNumber": "PO4447",
+    "type": "standalone"
+  },
+  {
+    "productCode": "PR15301",
+    "productName": "DS new-product-testing",
+    "date": "2026-09-02T04:43:44.812Z",
+    "supplier": "Test Supplier for Shopify",
+    "poNumber": "PO4447",
+    "type": "standalone"
+  }
+]

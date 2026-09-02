@@ -1,0 +1,20 @@
+{
+  "PR15242": {
+    "done": true,
+    "date": "2026-09-01T03:30:15.549Z",
+    "shopifyProductId": "3922781652407524834",
+    "tags": "Pre-Order-Auckland, Pre-Order-Wellington, Pre-Order-Christchurch"
+  },
+  "PR15241": {
+    "done": true,
+    "date": "2026-09-01T03:30:19.409Z",
+    "shopifyProductId": "3922695212106541448",
+    "tags": "Pre-Order-Wellington, Pre-Order-Christchurch"
+  },
+  "PR13374": {
+    "done": true,
+    "date": "2026-09-02T02:05:29.160Z",
+    "shopifyProductId": "3904465234889219277",
+    "tags": "Pre-Order-Christchurch"
+  }
+}

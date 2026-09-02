@@ -1,0 +1,171 @@
+[
+  {
+    "runId": "2026-09-01T03-11-50-554Z",
+    "date": "2026-09-01T03:11:50.554Z",
+    "summary": {
+      "total": 5,
+      "listed": 4,
+      "blocked": 1,
+      "skipped": 0
+    },
+    "products": [
+      {
+        "productCode": "PR15242",
+        "status": "listed",
+        "reason": null,
+        "date": "2026-09-01T03:11:50.554Z",
+        "result": {
+          "ok": true,
+          "productCode": "PR15242",
+          "shopifyProductId": "3922781652407524834",
+          "title": "DS Test Website _A",
+          "tags": "Pre-Order-Auckland",
+          "image": "3922166538736712416.png",
+          "isListed": true
+        }
+      },
+      {
+        "productCode": "PR13374",
+        "status": "listed",
+        "reason": null,
+        "date": "2026-09-01T03:11:50.554Z",
+        "result": {
+          "ok": true,
+          "productCode": "PR13374",
+          "shopifyProductId": "3904465234889219277",
+          "title": "DS Harsha Test",
+          "tags": "Pre-Order-Auckland",
+          "image": "tsb-living-logo.png",
+          "isListed": true
+        }
+      },
+      {
+        "productCode": "PR15241",
+        "status": "blocked",
+        "reason": "validation_failed",
+        "missing": [
+          "image"
+        ],
+        "error": null,
+        "date": "2026-09-01T03:11:50.554Z",
+        "result": {
+          "ok": false,
+          "reason": "validation_failed",
+          "missing": [
+            "image"
+          ],
+          "productCode": "PR15241"
+        }
+      },
+      {
+        "productCode": "PR15245",
+        "status": "listed",
+        "reason": null,
+        "date": "2026-09-01T03:11:50.554Z",
+        "result": {
+          "ok": true,
+          "productCode": "PR15245",
+          "shopifyProductId": "3922795073952178403",
+          "title": "DS test-product-shopify",
+          "tags": "Pre-Order-Auckland",
+          "image": "3922166538736712416.png",
+          "isListed": true
+        }
+      },
+      {
+        "productCode": "PR15301",
+        "status": "listed",
+        "reason": null,
+        "date": "2026-09-01T03:11:50.554Z",
+        "result": {
+          "ok": true,
+          "productCode": "PR15301",
+          "shopifyProductId": "3923730468901786847",
+          "title": "DS new-product-testing",
+          "tags": "Pre-Order-Auckland",
+          "image": "tsb-living-logo.png",
+          "isListed": true
+        }
+      }
+    ]
+  },
+  {
+    "runId": "2026-09-02T03-49-02-170Z",
+    "date": "2026-09-02T03:49:02.170Z",
+    "summary": {
+      "total": 4,
+      "listed": 3,
+      "blocked": 1,
+      "skipped": 0
+    },
+    "products": [
+      {
+        "productCode": "PR15242",
+        "poNumber": "PO4447",
+        "status": "listed",
+        "reason": null,
+        "date": "2026-09-02T03:49:02.170Z",
+        "result": {
+          "ok": true,
+          "productCode": "PR15242",
+          "shopifyProductId": "3922781652407524834",
+          "title": "DS Test Website _A",
+          "tags": "Pre-Order-Wellington, Pre-Order-Christchurch, Pre-Order-Auckland",
+          "image": "3922166538736712416.png",
+          "isListed": true
+        }
+      },
+      {
+        "productCode": "PR15241",
+        "poNumber": "PO4447",
+        "status": "blocked",
+        "reason": "validation_failed",
+        "missing": [
+          "image"
+        ],
+        "error": null,
+        "date": "2026-09-02T03:49:02.170Z",
+        "result": {
+          "ok": false,
+          "reason": "validation_failed",
+          "missing": [
+            "image"
+          ],
+          "productCode": "PR15241"
+        }
+      },
+      {
+        "productCode": "PR15301",
+        "poNumber": "PO4447",
+        "status": "listed",
+        "reason": null,
+        "date": "2026-09-02T03:49:02.170Z",
+        "result": {
+          "ok": true,
+          "productCode": "PR15301",
+          "shopifyProductId": "3923730468901786847",
+          "title": "DS new-product-testing",
+          "tags": "Pre-Order-Auckland",
+          "image": "tsb-living-logo.png",
+          "isListed": true
+        }
+      },
+      {
+        "productCode": "PR13374",
+        "poNumber": "PO4447",
+        "status": "listed",
+        "reason": null,
+        "date": "2026-09-02T03:49:02.170Z",
+        "result": {
+          "ok": true,
+          "productCode": "PR13374",
+          "shopifyProductId": "3904465234889219277",
+          "title": "DS Harsha Test",
+          "tags": "Pre-Order-Auckland",
+          "image": "tsb-living-logo.png",
+          "isListed": true
+        }
+      }
+    ]
+  }
+]
