@@ -45,5 +45,40 @@
     "done": true,
     "date": "2026-09-02T02:05:24.776Z",
     "supplier": "Test Supplier for Shopify"
+  },
+  "blocked:PO1589:PR15242-A": {
+    "poNumber": "PO1589",
+    "supplier": "Test Supplier for Shopify",
+    "reason": "Missing price",
+    "detectedAt": "2026-09-03T22:49:18.907Z",
+    "productCode": "PR15242-A"
+  },
+  "blocked:PO1589:PR15242-B": {
+    "poNumber": "PO1589",
+    "supplier": "Test Supplier for Shopify",
+    "reason": "Missing price",
+    "detectedAt": "2026-09-03T22:49:18.910Z",
+    "productCode": "PR15242-B"
+  },
+  "blocked:PO1589:PR15242": {
+    "poNumber": "PO1589",
+    "supplier": "Test Supplier for Shopify",
+    "reason": "Missing price",
+    "detectedAt": "2026-09-03T22:49:18.912Z",
+    "productCode": "PR15242"
+  },
+  "blocked:PO1589:PR13374": {
+    "poNumber": "PO1589",
+    "supplier": "Test Supplier for Shopify",
+    "reason": "Missing price",
+    "detectedAt": "2026-09-03T22:49:18.914Z",
+    "productCode": "PR13374"
+  },
+  "blocked:PO1589:PR15241": {
+    "poNumber": "PO1589",
+    "supplier": "Test Supplier for Shopify",
+    "reason": "Missing price",
+    "detectedAt": "2026-09-03T22:49:18.915Z",
+    "productCode": "PR15241"
   }
 }

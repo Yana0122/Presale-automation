@@ -1,0 +1,19 @@
+{
+  "PR15241::PO1589": {
+    "type": "standalone",
+    "productCode": "PR15241",
+    "poNumber": "PO1589",
+    "warehouses": {},
+    "updatedAt": "2026-09-03T03:44:14.351Z"
+  },
+  "PR15242::PO1589": {
+    "type": "bom",
+    "productCode": "PR15242",
+    "poNumber": "PO1589",
+    "children": {
+      "PR15242-A": {},
+      "PR15242-B": {}
+    },
+    "updatedAt": "2026-09-03T03:44:15.136Z"
+  }
+}

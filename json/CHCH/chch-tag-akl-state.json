@@ -16,5 +16,32 @@
     "date": "2026-09-02T02:05:29.160Z",
     "shopifyProductId": "3904465234889219277",
     "tags": "Pre-Order-Christchurch"
+  },
+  "tag:PO1589:PR15241": {
+    "done": true,
+    "alreadyPresent": true,
+    "date": "2026-09-03T03:22:06.106Z",
+    "productCode": "PR15241",
+    "poNumber": "PO1589",
+    "type": "standalone",
+    "shopifyProductId": "3922695212106541448"
+  },
+  "tag:PO1589:PR13374": {
+    "done": true,
+    "date": "2026-09-03T03:22:46.825Z",
+    "productCode": "PR13374",
+    "poNumber": "PO1589",
+    "type": "standalone",
+    "shopifyProductId": "3904465234889219277",
+    "tags": "Pre-Order-Auckland, Pre-Order-Wellington, Pre-Order-Christchurch"
+  },
+  "tag:PO1589:PR15242": {
+    "done": true,
+    "alreadyPresent": true,
+    "date": "2026-09-03T03:22:47.195Z",
+    "productCode": "PR15242",
+    "poNumber": "PO1589",
+    "type": "bom",
+    "shopifyProductId": "3922781652407524834"
   }
 }

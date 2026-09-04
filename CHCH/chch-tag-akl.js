@@ -4,17 +4,25 @@ const fs = require("fs");
 const path = require("path");
 const OAuth = require("oauth-1.0a");
 const crypto = require("crypto");
-const JSONbig = require("json-bigint")({ storeAsString: true });
+const JSONbig = require("json-bigint")({
+  storeAsString: true,
+});
 
 // ============================================================
 // CONFIG
 // ============================================================
 
-// Christchurch ../json/CHCH/processed-state-chch.json
-const CHCH_STATE_FILE = path.join(__dirname, "../json/CHCH/processed-state-chch.json");
+// Christchurch processed state
+const CHCH_STATE_FILE = path.join(
+  __dirname,
+  "../json/CHCH/processed-state-chch.json"
+);
 
 // Separate state for this tagging operation
-const TAG_STATE_FILE = path.join(__dirname, "../json/CHCH/chch-tag-akl-state.json");
+const TAG_STATE_FILE = path.join(
+  __dirname,
+  "../json/CHCH/chch-tag-akl-state.json"
+);
 
 const TV_API = "https://api.tradevine.com";
 
@@ -32,7 +40,10 @@ const oauth = OAuth({
   },
   signature_method: "HMAC-SHA1",
   hash_function: (base, key) =>
-    crypto.createHmac("sha1", key).update(base).digest("base64"),
+    crypto
+      .createHmac("sha1", key)
+      .update(base)
+      .digest("base64"),
 });
 
 const token = {
@@ -45,7 +56,15 @@ const token = {
 // ============================================================
 
 async function apiGet(url) {
-  const authHeader = oauth.toHeader(oauth.authorize({ url, method: "GET" }, token));
+  const authHeader = oauth.toHeader(
+    oauth.authorize(
+      {
+        url,
+        method: "GET",
+      },
+      token
+    )
+  );
 
   const res = await fetch(url, {
     method: "GET",
@@ -58,13 +77,18 @@ async function apiGet(url) {
   const text = await res.text();
 
   let data = null;
+
   try {
     data = JSONbig.parse(text);
   } catch {
     data = null;
   }
 
-  return { status: res.status, data, raw: text };
+  return {
+    status: res.status,
+    data,
+    raw: text,
+  };
 }
 
 // ============================================================
@@ -72,7 +96,15 @@ async function apiGet(url) {
 // ============================================================
 
 async function apiPost(url, body) {
-  const authHeader = oauth.toHeader(oauth.authorize({ url, method: "POST" }, token));
+  const authHeader = oauth.toHeader(
+    oauth.authorize(
+      {
+        url,
+        method: "POST",
+      },
+      token
+    )
+  );
 
   const res = await fetch(url, {
     method: "POST",
@@ -87,13 +119,18 @@ async function apiPost(url, body) {
   const text = await res.text();
 
   let data = null;
+
   try {
     data = JSONbig.parse(text);
   } catch {
     data = null;
   }
 
-  return { status: res.status, data, raw: text };
+  return {
+    status: res.status,
+    data,
+    raw: text,
+  };
 }
 
 // ============================================================
@@ -102,13 +139,19 @@ async function apiPost(url, body) {
 
 function loadChristchurchState() {
   if (!fs.existsSync(CHCH_STATE_FILE)) {
-    throw new Error(`Could not find Christchurch state file: ${CHCH_STATE_FILE}`);
+    throw new Error(
+      `Could not find Christchurch state file: ${CHCH_STATE_FILE}`
+    );
   }
 
   try {
-    return JSON.parse(fs.readFileSync(CHCH_STATE_FILE, "utf8"));
+    return JSON.parse(
+      fs.readFileSync(CHCH_STATE_FILE, "utf8")
+    );
   } catch (err) {
-    throw new Error(`Could not read Christchurch ../json/CHCH/processed-state-chch.json: ${err.message}`);
+    throw new Error(
+      `Could not read Christchurch processed state: ${err.message}`
+    );
   }
 }
 
@@ -117,10 +160,14 @@ function loadChristchurchState() {
 // ============================================================
 
 function loadTagState() {
-  if (!fs.existsSync(TAG_STATE_FILE)) return {};
+  if (!fs.existsSync(TAG_STATE_FILE)) {
+    return {};
+  }
 
   try {
-    return JSON.parse(fs.readFileSync(TAG_STATE_FILE, "utf8"));
+    return JSON.parse(
+      fs.readFileSync(TAG_STATE_FILE, "utf8")
+    );
   } catch {
     return {};
   }
@@ -131,27 +178,66 @@ function loadTagState() {
 // ============================================================
 
 function saveTagState(state) {
-  fs.writeFileSync(TAG_STATE_FILE, JSON.stringify(state, null, 2));
+  fs.writeFileSync(
+    TAG_STATE_FILE,
+    JSON.stringify(state, null, 2)
+  );
 }
 
 // ============================================================
-// EXTRACT PRODUCT CODE
+// EXTRACT PRODUCT CODE FROM STATE KEY
 // ============================================================
 
 function extractProductCode(key) {
-  if (!key) return null;
+  if (!key) {
+    return null;
+  }
 
+  // inv:PO1589:PR13374
   if (key.startsWith("inv:")) {
     const parts = key.split(":");
-    if (parts.length >= 3) return parts.slice(2).join(":").trim().toUpperCase();
+
+    if (parts.length >= 3) {
+      return parts
+        .slice(2)
+        .join(":")
+        .trim()
+        .toUpperCase();
+    }
   }
 
+  // title:PR13374
   if (key.startsWith("title:")) {
-    return key.replace(/^title:/i, "").trim().toUpperCase();
+    return key
+      .replace(/^title:/i, "")
+      .trim()
+      .toUpperCase();
   }
 
+  // bom:PR15242
   if (key.startsWith("bom:")) {
-    return key.replace(/^bom:/i, "").trim().toUpperCase();
+    return key
+      .replace(/^bom:/i, "")
+      .trim()
+      .toUpperCase();
+  }
+
+  return null;
+}
+
+// ============================================================
+// EXTRACT PO NUMBER FROM INV KEY
+// ============================================================
+
+function extractPoNumber(key) {
+  if (!key || !key.startsWith("inv:")) {
+    return null;
+  }
+
+  const parts = key.split(":");
+
+  if (parts.length >= 3) {
+    return parts[1].trim();
   }
 
   return null;
@@ -162,59 +248,412 @@ function extractProductCode(key) {
 // ============================================================
 
 function isChildProduct(productCode) {
-  return /^PR\d+-[A-Z]$/i.test(String(productCode || "").trim());
+  return /^PR\d+-[A-Z]$/i.test(
+    String(productCode || "").trim()
+  );
 }
 
 // ============================================================
-// GET PRODUCTS THAT WERE ACTIONED IN CHRISTCHURCH
+// GET COMPLETED INVENTORY CYCLES
+// ============================================================
+//
+// Example:
+//
+// inv:PO1589:PR13374
+// inv:PO1595:PR13374
+//
+// Both remain in state.
+//
+// The newest completed inventory record is the
+// current cycle.
 // ============================================================
 
-function getActionedProducts(state) {
-  const products = new Set();
+function getCompletedInventoryCycles(
+  productCode,
+  state
+) {
+  return Object.keys(state)
+    .filter(
+      (key) =>
+        key.startsWith("inv:") &&
+        key.endsWith(`:${productCode}`)
+    )
+    .map((key) => {
+      const entry = state[key];
 
-  for (const [key, value] of Object.entries(state)) {
-    if (!value || value.done !== true) continue;
+      return {
+        key,
+        poNumber: extractPoNumber(key),
+        date:
+          entry?.date ||
+          entry?.processedDate ||
+          "",
+        supplier: entry?.supplier || "",
+        entry,
+      };
+    })
+    .filter(
+      (cycle) =>
+        cycle.entry?.done === true &&
+        cycle.poNumber
+    )
+    .sort((a, b) => {
+      const aTime = Date.parse(
+        a.date || ""
+      );
 
-    const productCode = extractProductCode(key);
-    if (!productCode) continue;
+      const bTime = Date.parse(
+        b.date || ""
+      );
 
-    if (isChildProduct(productCode)) continue;
+      return (
+        (Number.isNaN(bTime)
+          ? 0
+          : bTime) -
+        (Number.isNaN(aTime)
+          ? 0
+          : aTime)
+      );
+    });
+}
 
-    products.add(productCode);
+// ============================================================
+// GET CURRENT CYCLE FOR PRODUCT
+// ============================================================
+
+function getCurrentCycleForProduct(
+  productCode,
+  state
+) {
+  const cycles =
+    getCompletedInventoryCycles(
+      productCode,
+      state
+    );
+
+  return cycles[0] || null;
+}
+
+// ============================================================
+// GET CURRENT BOM CYCLE
+// ============================================================
+//
+// BOM parents do not normally have their own inv:
+// record.
+//
+// Example:
+//
+// inv:PO1589:PR15242-A
+// inv:PO1589:PR15242-B
+// bom:PR15242
+//
+// The BOM cycle is determined from the children.
+//
+// All children must have the same current PO.
+// ============================================================
+
+function getCurrentBomCycle(
+  parentCode,
+  state
+) {
+  const childCodes = Object.keys(state)
+    .filter(
+      (key) =>
+        key.startsWith("inv:")
+    )
+    .map((key) =>
+      extractProductCode(key)
+    )
+    .filter(Boolean)
+    .filter(
+      (code) =>
+        isChildProduct(code) &&
+        code.startsWith(
+          `${parentCode}-`
+        )
+    );
+
+  const uniqueChildCodes = [
+    ...new Set(childCodes),
+  ];
+
+  if (
+    uniqueChildCodes.length === 0
+  ) {
+    return {
+      ready: false,
+      reason: "no_bom_children_found",
+      childCycles: [],
+      poNumber: null,
+    };
   }
 
-  return Array.from(products);
+  const childCycles = [];
+
+  for (const childCode of uniqueChildCodes) {
+    const cycle =
+      getCurrentCycleForProduct(
+        childCode,
+        state
+      );
+
+    if (!cycle) {
+      return {
+        ready: false,
+        reason: `no_completed_cycle_for_${childCode}`,
+        childCycles,
+        poNumber: null,
+      };
+    }
+
+    childCycles.push({
+      childCode,
+      cycle,
+    });
+  }
+
+  const poNumbers = [
+    ...new Set(
+      childCycles.map(
+        (item) =>
+          String(
+            item.cycle.poNumber
+          ).toUpperCase()
+      )
+    ),
+  ];
+
+  if (poNumbers.length !== 1) {
+    return {
+      ready: false,
+      reason: "bom_children_different_cycles",
+      childCycles,
+      poNumber: null,
+      poNumbers,
+    };
+  }
+
+  return {
+    ready: true,
+    reason: null,
+    childCycles,
+    poNumber:
+      childCycles[0].cycle.poNumber,
+    poNumbers,
+  };
+}
+
+// ============================================================
+// BUILD CURRENT CHCH PRODUCT CYCLES
+// ============================================================
+//
+// Returns only parent/standalone products.
+//
+// BOM children are excluded.
+//
+// Example result:
+//
+// [
+//   {
+//     productCode: "PR13374",
+//     poNumber: "PO1595",
+//     type: "standalone"
+//   },
+//   {
+//     productCode: "PR15242",
+//     poNumber: "PO1595",
+//     type: "bom"
+//   }
+// ]
+// ============================================================
+
+function getCurrentChchProducts(
+  state
+) {
+  const products = new Map();
+
+  // ----------------------------------------------------------
+  // STANDALONE PRODUCTS
+  // ----------------------------------------------------------
+
+  for (const key of Object.keys(state)) {
+    if (!key.startsWith("inv:")) {
+      continue;
+    }
+
+    const productCode =
+      extractProductCode(key);
+
+    if (!productCode) {
+      continue;
+    }
+
+    // Children are handled through their BOM parent.
+    if (
+      isChildProduct(productCode)
+    ) {
+      continue;
+    }
+
+    const cycle =
+      getCurrentCycleForProduct(
+        productCode,
+        state
+      );
+
+    if (!cycle) {
+      continue;
+    }
+
+    products.set(
+      productCode,
+      {
+        productCode,
+        poNumber: cycle.poNumber,
+        type: "standalone",
+      }
+    );
+  }
+
+  // ----------------------------------------------------------
+  // BOM PARENTS
+  // ----------------------------------------------------------
+
+  for (const key of Object.keys(state)) {
+    if (!key.startsWith("bom:")) {
+      continue;
+    }
+
+    const parentCode =
+      key.replace(/^bom:/i, "")
+        .trim()
+        .toUpperCase();
+
+    if (!parentCode) {
+      continue;
+    }
+
+    const bomCycle =
+      getCurrentBomCycle(
+        parentCode,
+        state
+      );
+
+    if (!bomCycle.ready) {
+      console.log(
+        `${parentCode}: could not determine current BOM cycle — ${bomCycle.reason}`
+      );
+
+      continue;
+    }
+
+    products.set(
+      parentCode,
+      {
+        productCode: parentCode,
+        poNumber: bomCycle.poNumber,
+        type: "bom",
+      }
+    );
+  }
+
+  return Array.from(
+    products.values()
+  );
+}
+
+// ============================================================
+// GET TAG STATE KEY
+// ============================================================
+//
+// IMPORTANT:
+//
+// Product alone is NOT enough.
+//
+// Cycle 1:
+// tag:PO1589:PR13374
+//
+// Cycle 2:
+// tag:PO1595:PR13374
+// ============================================================
+
+function getTagStateKey(
+  productCode,
+  poNumber
+) {
+  return `tag:${poNumber}:${productCode}`;
+}
+
+// ============================================================
+// CHECK WHETHER CURRENT CYCLE WAS ALREADY TAGGED
+// ============================================================
+
+function isCycleAlreadyTagged(
+  productCode,
+  poNumber,
+  tagState
+) {
+  const key =
+    getTagStateKey(
+      productCode,
+      poNumber
+    );
+
+  return (
+    tagState[key]?.done === true
+  );
 }
 
 // ============================================================
 // FIND AKL SHOPIFY PRODUCT RECORD
 // ============================================================
 
-async function findAklShopifyProduct(productCode) {
+async function findAklShopifyProduct(
+  productCode
+) {
   const url =
     `${TV_API}/v1/ShopifyProduct` +
-    `?productCode=${encodeURIComponent(productCode)}` +
+    `?productCode=${encodeURIComponent(
+      productCode
+    )}` +
     `&pageSize=100`;
 
   console.log("");
   console.log("GET:");
   console.log(url);
 
-  const result = await apiGet(url);
+  const result =
+    await apiGet(url);
 
-  console.log(`HTTP: ${result.status}`);
+  console.log(
+    `HTTP: ${result.status}`
+  );
 
-  if (result.status !== 200) {
-    console.log("Response:", result.raw?.slice(0, 500));
+  if (
+    result.status !== 200
+  ) {
+    console.log(
+      "Response:",
+      result.raw?.slice(0, 500)
+    );
+
     return null;
   }
 
-  const list = result.data?.List || result.data?.list || [];
+  const list =
+    result.data?.List ||
+    result.data?.list ||
+    [];
 
   return (
     list.find(
       (item) =>
-        String(item.ProductCode || "").toUpperCase() === String(productCode).toUpperCase()
+        String(
+          item.ProductCode || ""
+        ).toUpperCase() ===
+        String(
+          productCode
+        ).toUpperCase()
     ) || null
   );
 }
@@ -223,23 +662,41 @@ async function findAklShopifyProduct(productCode) {
 // BUILD TAG LIST
 // ============================================================
 
-function addChristchurchTag(existingTags) {
+function addChristchurchTag(
+  existingTags
+) {
   const tags = [];
 
   if (existingTags) {
     String(existingTags)
       .split(",")
-      .map((tag) => tag.trim())
+      .map((tag) =>
+        tag.trim()
+      )
       .filter(Boolean)
       .forEach((tag) => {
-        if (!tags.some((existing) => existing.toLowerCase() === tag.toLowerCase())) {
+        if (
+          !tags.some(
+            (existing) =>
+              existing.toLowerCase() ===
+              tag.toLowerCase()
+          )
+        ) {
           tags.push(tag);
         }
       });
   }
 
-  if (!tags.some((tag) => tag.toLowerCase() === REQUIRED_TAG.toLowerCase())) {
-    tags.push(REQUIRED_TAG);
+  if (
+    !tags.some(
+      (tag) =>
+        tag.toLowerCase() ===
+        REQUIRED_TAG.toLowerCase()
+    )
+  ) {
+    tags.push(
+      REQUIRED_TAG
+    );
   }
 
   return tags.join(", ");
@@ -249,23 +706,46 @@ function addChristchurchTag(existingTags) {
 // SAVE AKL SHOPIFY TAB
 // ============================================================
 
-async function saveAklShopifyProduct(shopifyProduct) {
-  const shopifyProductId = shopifyProduct.ShopifyProductID;
-  if (!shopifyProductId) throw new Error("ShopifyProductID missing");
+async function saveAklShopifyProduct(
+  shopifyProduct
+) {
+  const shopifyProductId =
+    shopifyProduct.ShopifyProductID;
 
-  const url = `${TV_API}/v1/ShopifyProduct/${shopifyProductId}`;
+  if (!shopifyProductId) {
+    throw new Error(
+      "ShopifyProductID missing"
+    );
+  }
+
+  const url =
+    `${TV_API}/v1/ShopifyProduct/${shopifyProductId}`;
 
   console.log("");
   console.log("POST:");
   console.log(url);
 
-  const result = await apiPost(url, shopifyProduct);
+  const result =
+    await apiPost(
+      url,
+      shopifyProduct
+    );
 
-  console.log(`HTTP: ${result.status}`);
+  console.log(
+    `HTTP: ${result.status}`
+  );
 
-  if (result.status !== 200 && result.status !== 201) {
+  if (
+    result.status !== 200 &&
+    result.status !== 201
+  ) {
     throw new Error(
-      `ShopifyProduct save failed (${result.status}): ${result.raw?.slice(0, 500) || ""}`
+      `ShopifyProduct save failed (${result.status}): ${
+        result.raw?.slice(
+          0,
+          500
+        ) || ""
+      }`
     );
   }
 
@@ -276,18 +756,38 @@ async function saveAklShopifyProduct(shopifyProduct) {
 // VERIFY TAG
 // ============================================================
 
-async function verifyChristchurchTag(productCode) {
-  const fresh = await findAklShopifyProduct(productCode);
+async function verifyChristchurchTag(
+  productCode
+) {
+  const fresh =
+    await findAklShopifyProduct(
+      productCode
+    );
 
-  if (!fresh) throw new Error("Could not reload ShopifyProduct after save");
+  if (!fresh) {
+    throw new Error(
+      "Could not reload ShopifyProduct after save"
+    );
+  }
 
-  const tags = String(fresh.Tags || "")
-    .split(",")
-    .map((tag) => tag.trim().toLowerCase())
-    .filter(Boolean);
+  const tags =
+    String(
+      fresh.Tags || ""
+    )
+      .split(",")
+      .map((tag) =>
+        tag.trim().toLowerCase()
+      )
+      .filter(Boolean);
 
-  if (!tags.includes(REQUIRED_TAG.toLowerCase())) {
-    throw new Error(`${REQUIRED_TAG} was not found after reload`);
+  if (
+    !tags.includes(
+      REQUIRED_TAG.toLowerCase()
+    )
+  ) {
+    throw new Error(
+      `${REQUIRED_TAG} was not found after reload`
+    );
   }
 
   return fresh;
@@ -297,91 +797,242 @@ async function verifyChristchurchTag(productCode) {
 // TAG ONE PRODUCT
 // ============================================================
 
-async function tagProduct(productCode, tagState) {
+async function tagProduct(
+  productCode,
+  poNumber,
+  type,
+  tagState
+) {
   console.log("");
-  console.log("========================================");
-  console.log(`PROCESSING ${productCode}`);
-  console.log("========================================");
+  console.log(
+    "========================================"
+  );
+  console.log(
+    `PROCESSING ${productCode}`
+  );
+  console.log(
+    `CURRENT CHCH CYCLE: ${poNumber}`
+  );
+  console.log(
+    `TYPE: ${type}`
+  );
+  console.log(
+    "========================================"
+  );
 
-  if (tagState[productCode]?.done === true) {
-    console.log(`${productCode}: already tagged previously — SKIPPING`);
-    return { ok: true, skipped: true };
-  }
+  const tagStateKey =
+    getTagStateKey(
+      productCode,
+      poNumber
+    );
 
-  const shopifyProduct = await findAklShopifyProduct(productCode);
-
-  if (!shopifyProduct) {
-    console.log(`${productCode}: BLOCKED — no AKL ShopifyProduct record found`);
-    return { ok: false, reason: "no_akl_shopify_record" };
-  }
-
-  console.log("");
-  console.log(`${productCode}: AKL ShopifyProduct found`);
-  console.log(`ShopifyProductID: ${shopifyProduct.ShopifyProductID}`);
-  console.log(`Current tags: "${shopifyProduct.Tags || ""}"`);
-
-  const newTags = addChristchurchTag(shopifyProduct.Tags);
-
-  console.log("");
-  console.log(`New tags: "${newTags}"`);
+  // ----------------------------------------------------------
+  // CYCLE-SPECIFIC STATE CHECK
+  // ----------------------------------------------------------
 
   if (
-    String(shopifyProduct.Tags || "")
-      .split(",")
-      .map((tag) => tag.trim().toLowerCase())
-      .includes(REQUIRED_TAG.toLowerCase())
+    isCycleAlreadyTagged(
+      productCode,
+      poNumber,
+      tagState
+    )
   ) {
-    console.log(`${productCode}: ${REQUIRED_TAG} already exists ✓`);
+    console.log(
+      `${productCode}: already tagged for ${poNumber} — SKIPPING`
+    );
 
-    tagState[productCode] = {
+    return {
+      ok: true,
+      skipped: true,
+    };
+  }
+
+  // ----------------------------------------------------------
+  // FIND AKL SHOPIFY PRODUCT
+  // ----------------------------------------------------------
+
+  const shopifyProduct =
+    await findAklShopifyProduct(
+      productCode
+    );
+
+  if (!shopifyProduct) {
+    console.log(
+      `${productCode}: BLOCKED — no AKL ShopifyProduct record found`
+    );
+
+    return {
+      ok: false,
+      reason:
+        "no_akl_shopify_record",
+    };
+  }
+
+  console.log("");
+  console.log(
+    `${productCode}: AKL ShopifyProduct found`
+  );
+
+  console.log(
+    `ShopifyProductID: ${shopifyProduct.ShopifyProductID}`
+  );
+
+  console.log(
+    `Current tags: "${shopifyProduct.Tags || ""}"`
+  );
+
+  // ----------------------------------------------------------
+  // CHECK EXISTING TAG
+  // ----------------------------------------------------------
+
+  const existingTags =
+    String(
+      shopifyProduct.Tags || ""
+    )
+      .split(",")
+      .map((tag) =>
+        tag.trim().toLowerCase()
+      )
+      .filter(Boolean);
+
+  if (
+    existingTags.includes(
+      REQUIRED_TAG.toLowerCase()
+    )
+  ) {
+    console.log(
+      `${productCode}: ${REQUIRED_TAG} already exists ✓`
+    );
+
+    tagState[tagStateKey] = {
       done: true,
       alreadyPresent: true,
-      date: new Date().toISOString(),
-      shopifyProductId: String(shopifyProduct.ShopifyProductID),
+      date:
+        new Date().toISOString(),
+      productCode,
+      poNumber,
+      type,
+      shopifyProductId:
+        String(
+          shopifyProduct.ShopifyProductID
+        ),
     };
 
-    saveTagState(tagState);
+    saveTagState(
+      tagState
+    );
 
-    return { ok: true, alreadyPresent: true };
+    return {
+      ok: true,
+      alreadyPresent: true,
+    };
   }
 
-  shopifyProduct.Tags = newTags;
+  // ----------------------------------------------------------
+  // ADD TAG
+  // ----------------------------------------------------------
+
+  const newTags =
+    addChristchurchTag(
+      shopifyProduct.Tags
+    );
+
+  console.log("");
+  console.log(
+    `New tags: "${newTags}"`
+  );
+
+  shopifyProduct.Tags =
+    newTags;
+
+  // ----------------------------------------------------------
+  // SAVE
+  // ----------------------------------------------------------
 
   try {
-    await saveAklShopifyProduct(shopifyProduct);
+    await saveAklShopifyProduct(
+      shopifyProduct
+    );
+
     console.log("");
-    console.log(`${productCode}: tag save successful ✓`);
+    console.log(
+      `${productCode}: tag save successful ✓`
+    );
   } catch (err) {
     console.log("");
-    console.log(`${productCode}: TAG SAVE FAILED`);
-    console.log(err.message);
+    console.log(
+      `${productCode}: TAG SAVE FAILED`
+    );
 
-    return { ok: false, reason: "tag_save_failed", error: err.message };
+    console.log(
+      err.message
+    );
+
+    return {
+      ok: false,
+      reason:
+        "tag_save_failed",
+      error: err.message,
+    };
   }
 
+  // ----------------------------------------------------------
+  // VERIFY
+  // ----------------------------------------------------------
+
   try {
-    const fresh = await verifyChristchurchTag(productCode);
+    const fresh =
+      await verifyChristchurchTag(
+        productCode
+      );
 
     console.log("");
-    console.log(`${productCode}: ${REQUIRED_TAG} verified ✓`);
-    console.log(`Final tags: "${fresh.Tags}"`);
+    console.log(
+      `${productCode}: ${REQUIRED_TAG} verified ✓`
+    );
 
-    tagState[productCode] = {
+    console.log(
+      `Final tags: "${fresh.Tags}"`
+    );
+
+    tagState[tagStateKey] = {
       done: true,
-      date: new Date().toISOString(),
-      shopifyProductId: String(fresh.ShopifyProductID),
+      date:
+        new Date().toISOString(),
+      productCode,
+      poNumber,
+      type,
+      shopifyProductId:
+        String(
+          fresh.ShopifyProductID
+        ),
       tags: fresh.Tags,
     };
 
-    saveTagState(tagState);
+    saveTagState(
+      tagState
+    );
 
-    return { ok: true, tags: fresh.Tags };
+    return {
+      ok: true,
+      tags: fresh.Tags,
+    };
   } catch (err) {
     console.log("");
-    console.log(`${productCode}: VERIFICATION FAILED`);
-    console.log(err.message);
+    console.log(
+      `${productCode}: VERIFICATION FAILED`
+    );
 
-    return { ok: false, reason: "verification_failed", error: err.message };
+    console.log(
+      err.message
+    );
+
+    return {
+      ok: false,
+      reason:
+        "verification_failed",
+      error: err.message,
+    };
   }
 }
 
@@ -391,9 +1042,22 @@ async function tagProduct(productCode, tagState) {
 
 async function main() {
   console.log("");
-  console.log("==============================================");
-  console.log(" CHCH → AKL SHOPIFY TAG AUTOMATION");
-  console.log("==============================================");
+  console.log(
+    "=============================================="
+  );
+  console.log(
+    " CHCH → AKL SHOPIFY TAG AUTOMATION"
+  );
+  console.log(
+    " + CYCLE 1 / CYCLE 2 SUPPORT"
+  );
+  console.log(
+    "=============================================="
+  );
+
+  // ----------------------------------------------------------
+  // ENV CHECK
+  // ----------------------------------------------------------
 
   const requiredEnv = [
     "TV_CONSUMER_KEY",
@@ -403,64 +1067,156 @@ async function main() {
   ];
 
   for (const name of requiredEnv) {
-    if (!process.env[name]) throw new Error(`Missing ${name} in .env`);
+    if (!process.env[name]) {
+      throw new Error(
+        `Missing ${name} in .env`
+      );
+    }
   }
-
-  console.log("");
-  console.log("✓ Auckland Tradevine credentials found");
-
-  const chchState = loadChristchurchState();
-  const products = getActionedProducts(chchState);
 
   console.log("");
   console.log(
-    `Found ${products.length} eligible CHCH product(s) in ../json/CHCH/processed-state-chch.json.`
+    "✓ Auckland Tradevine credentials found"
   );
 
-  if (products.length === 0) {
-    console.log("Nothing to process.");
+  // ----------------------------------------------------------
+  // LOAD STATE
+  // ----------------------------------------------------------
+
+  const chchState =
+    loadChristchurchState();
+
+  const products =
+    getCurrentChchProducts(
+      chchState
+    );
+
+  console.log("");
+  console.log(
+    `Found ${products.length} current CHCH product cycle(s) in processed state.`
+  );
+
+  if (
+    products.length === 0
+  ) {
+    console.log(
+      "Nothing to process."
+    );
+
     return;
   }
 
-  console.log("");
-  console.log("Products to check in AKL:");
-  products.forEach((code) => console.log(`  - ${code}`));
+  // ----------------------------------------------------------
+  // DISPLAY CURRENT CYCLES
+  // ----------------------------------------------------------
 
-  const tagState = loadTagState();
+  console.log("");
+  console.log(
+    "Current CHCH cycles to check in AKL:"
+  );
+
+  for (const product of products) {
+    console.log(
+      `  - ${product.productCode} → ${product.poNumber} (${product.type})`
+    );
+  }
+
+  // ----------------------------------------------------------
+  // LOAD TAG STATE
+  // ----------------------------------------------------------
+
+  const tagState =
+    loadTagState();
 
   let tagged = 0;
   let alreadyDone = 0;
   let blocked = 0;
 
-  for (const productCode of products) {
-    const result = await tagProduct(productCode, tagState);
+  // ----------------------------------------------------------
+  // PROCESS
+  // ----------------------------------------------------------
 
-    if (result.ok) {
-      if (result.skipped || result.alreadyPresent) {
-        alreadyDone++;
+  for (const product of products) {
+    try {
+      const result =
+        await tagProduct(
+          product.productCode,
+          product.poNumber,
+          product.type,
+          tagState
+        );
+
+      if (result.ok) {
+        if (
+          result.skipped ||
+          result.alreadyPresent
+        ) {
+          alreadyDone++;
+        } else {
+          tagged++;
+        }
       } else {
-        tagged++;
+        blocked++;
       }
-    } else {
+    } catch (err) {
       blocked++;
+
+      console.log("");
+      console.log(
+        `${product.productCode}: ERROR`
+      );
+
+      console.log(
+        err.message
+      );
     }
 
     console.log("");
   }
 
-  console.log("");
-  console.log("==============================================");
-  console.log(" CHCH → AKL TAGGING COMPLETE");
-  console.log("==============================================");
+  // ----------------------------------------------------------
+  // SUMMARY
+  // ----------------------------------------------------------
 
-  console.log(`Total CHCH products: ${products.length}`);
-  console.log(`Newly tagged:        ${tagged}`);
-  console.log(`Already tagged:      ${alreadyDone}`);
-  console.log(`Blocked/failed:      ${blocked}`);
   console.log("");
-  console.log(`Required tag: ${REQUIRED_TAG}`);
-  console.log(`Tag state saved to: ${TAG_STATE_FILE}`);
-  console.log("==============================================");
+  console.log(
+    "=============================================="
+  );
+  console.log(
+    " CHCH → AKL TAGGING COMPLETE"
+  );
+  console.log(
+    "=============================================="
+  );
+
+  console.log(
+    `Current CHCH products: ${products.length}`
+  );
+
+  console.log(
+    `Newly tagged:          ${tagged}`
+  );
+
+  console.log(
+    `Already tagged:        ${alreadyDone}`
+  );
+
+  console.log(
+    `Blocked/failed:        ${blocked}`
+  );
+
+  console.log("");
+  console.log(
+    `Required tag: ${REQUIRED_TAG}`
+  );
+
+  console.log(
+    `Tag state saved to: ${TAG_STATE_FILE}`
+  );
+
+  console.log(
+    "=============================================="
+  );
 }
 
 // ============================================================
@@ -469,9 +1225,22 @@ async function main() {
 
 main().catch((err) => {
   console.error("");
-  console.error("==============================================");
-  console.error(" CHCH → AKL TAGGING FAILED");
-  console.error("==============================================");
-  console.error(err.stack || err.message || err);
+  console.error(
+    "=============================================="
+  );
+  console.error(
+    " CHCH → AKL TAGGING FAILED"
+  );
+  console.error(
+    "=============================================="
+  );
+
+  console.error(
+    err.stack ||
+      err.message ||
+      err
+  );
+
   process.exit(1);
 });
+

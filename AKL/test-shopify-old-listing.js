@@ -5,6 +5,7 @@ const path = require("path");
 
 const {
   listExistingProductOnShopify,
+  getActivePOForProduct,
 } = require("./shopify-old-listing");
 
 // --------------------------------------------------
@@ -28,7 +29,7 @@ const RESULTS_FILE = path.join(
 function loadState() {
   if (!fs.existsSync(STATE_FILE)) {
     console.error(
-      "ERROR: ../json/AKL/../json/AKL/../json/AKL/processed-state.json not found."
+      `ERROR: ${STATE_FILE} not found.`
     );
 
     return {};
@@ -43,7 +44,7 @@ function loadState() {
     );
   } catch (err) {
     console.error(
-      "ERROR: Could not read ../json/AKL/processed-state.json:",
+      `ERROR: Could not read ${STATE_FILE}:`,
       err.message
     );
 
@@ -61,12 +62,13 @@ function loadResults() {
   }
 
   try {
-    const data = JSON.parse(
-      fs.readFileSync(
-        RESULTS_FILE,
-        "utf8"
-      )
-    );
+    const data =
+      JSON.parse(
+        fs.readFileSync(
+          RESULTS_FILE,
+          "utf8"
+        )
+      );
 
     return Array.isArray(data)
       ? data
@@ -103,10 +105,8 @@ function saveResults(results) {
 // PR15242-A
 // PR15242-B
 // ...
-// PR15242-Z
 //
 // These must NEVER be listed individually.
-//
 // --------------------------------------------------
 
 function isChildProduct(productCode) {
@@ -126,7 +126,8 @@ function extractProductCode(key) {
 
   // inv:PO4447:PR15242
   if (key.startsWith("inv:")) {
-    const parts = key.split(":");
+    const parts =
+      key.split(":");
 
     if (parts.length >= 3) {
       return parts
@@ -159,9 +160,18 @@ function extractProductCode(key) {
 // --------------------------------------------------
 // GET DONE PRODUCTS
 // --------------------------------------------------
+//
+// Only title: and bom: represent an active parent/
+// standalone product that should be considered for
+// Shopify listing.
+//
+// Inventory child records are deliberately not used
+// directly for Shopify listing.
+// --------------------------------------------------
 
 function getDoneProducts(state) {
-  const products = new Map();
+  const products =
+    new Map();
 
   Object.entries(state).forEach(
     ([key, value]) => {
@@ -172,20 +182,7 @@ function getDoneProducts(state) {
         return;
       }
 
-      // ------------------------------------------------
       // ONLY ACTIVE PRESALE STATE
-      // ------------------------------------------------
-      //
-      // title:PR15242
-      // bom:PR15242
-      //
-      // Do NOT use:
-      // inv:PO4447:PR15242
-      // shopify-listed:PR15242
-      //
-      // Those are historical/action records.
-      // ------------------------------------------------
-
       const isActiveStateKey =
         key.startsWith("title:") ||
         key.startsWith("bom:");
@@ -201,18 +198,19 @@ function getDoneProducts(state) {
         return;
       }
 
-      // ------------------------------------------------
       // IGNORE BOM CHILDREN
-      // ------------------------------------------------
-
       if (
-        isChildProduct(productCode)
+        isChildProduct(
+          productCode
+        )
       ) {
         return;
       }
 
       if (
-        !products.has(productCode)
+        !products.has(
+          productCode
+        )
       ) {
         products.set(
           productCode,
@@ -260,15 +258,17 @@ async function main() {
 
   console.log("");
 
-  // ------------------------------------------------
+  // --------------------------------------------------
   // LOAD STATE
-  // ------------------------------------------------
+  // --------------------------------------------------
 
   const state =
     loadState();
 
   const products =
-    getDoneProducts(state);
+    getDoneProducts(
+      state
+    );
 
   console.log(
     `Found ${products.length} eligible product(s).`
@@ -286,9 +286,9 @@ async function main() {
     return;
   }
 
-  // ------------------------------------------------
+  // --------------------------------------------------
   // PREPARE RUN
-  // ------------------------------------------------
+  // --------------------------------------------------
 
   const now =
     new Date().toISOString();
@@ -308,9 +308,9 @@ async function main() {
   let blockedCount = 0;
   let skippedCount = 0;
 
-  // ------------------------------------------------
+  // --------------------------------------------------
   // PROCESS PRODUCTS
-  // ------------------------------------------------
+  // --------------------------------------------------
 
   for (
     const product of products
@@ -322,9 +322,9 @@ async function main() {
       `Processing ${productCode}...`
     );
 
-    // ------------------------------------------------
-    // EXTRA CHILD SAFETY
-    // ------------------------------------------------
+    // --------------------------------------------------
+    // BOM CHILD PROTECTION
+    // --------------------------------------------------
 
     if (
       isChildProduct(
@@ -346,22 +346,23 @@ async function main() {
 
       continue;
     }
-    
+
     let activePO = null;
 
     try {
-      // ------------------------------------------------
-      // ONLY PRODUCT CODE IS PASSED
-      // ------------------------------------------------
+      // --------------------------------------------------
+      // FIND ACTIVE PO
+      // --------------------------------------------------
 
-      const activeCycle = getActivePOForProduct(
-        productCode,
-        state
-      );
+      const activeCycle =
+        getActivePOForProduct(
+          productCode,
+          state
+        );
 
       if (!activeCycle) {
         console.log(
-          `${productCode}: SKIPPED — no active presale cycle`
+          `  ${productCode}: SKIPPED — no active presale cycle`
         );
 
         skippedCount++;
@@ -369,46 +370,76 @@ async function main() {
         runResults.push({
           productCode,
           status: "skipped",
-          reason: "no_active_presale_cycle",
+          reason:
+            "no_active_presale_cycle",
           date: now,
         });
 
         continue;
       }
-      activePO = activeCycle.poNumber;
+
+      activePO =
+        activeCycle.poNumber;
 
       console.log(
-        `${productCode}: Active PO = ${activePO}`
+        `  ${productCode}: Active PO = ${activePO}`
       );
+
+      // --------------------------------------------------
+      // CALL ACTUAL SHOPIFY LISTING LOGIC
+      // --------------------------------------------------
+
       const result =
         await listExistingProductOnShopify(
-          productCode
+          productCode,
+          activePO
         );
 
-      // ------------------------------------------------
-      // LISTED
-      // ------------------------------------------------
+      // --------------------------------------------------
+      // SUCCESS
+      // --------------------------------------------------
 
       if (result.ok) {
-        listedCount++;
+        if (result.skipped) {
+          skippedCount++;
 
-        runResults.push({
-          productCode,
-          poNumber: activePO,
-          status: "listed",
-          reason: null,
-          date: now,
-          result,
-        });
+          runResults.push({
+            productCode,
+            poNumber: activePO,
+            status: "skipped",
+            reason:
+              result.reason ||
+              "skipped",
+            date: now,
+            result,
+          });
 
-        console.log(
-          `  ${productCode}: ✓ LISTED`
-        );
+          console.log(
+            `  ${productCode}: SKIPPED — ${
+              result.reason || "skipped"
+            }`
+          );
+        } else {
+          listedCount++;
+
+          runResults.push({
+            productCode,
+            poNumber: activePO,
+            status: "listed",
+            reason: null,
+            date: now,
+            result,
+          });
+
+          console.log(
+            `  ${productCode}: ✓ LISTED`
+          );
+        }
       }
 
-      // ------------------------------------------------
+      // --------------------------------------------------
       // BLOCKED
-      // ------------------------------------------------
+      // --------------------------------------------------
 
       else {
         blockedCount++;
@@ -464,18 +495,33 @@ async function main() {
     date: now,
 
     summary: {
-      total: products.length,
-      listed: listedCount,
-      blocked: blockedCount,
-      skipped: skippedCount,
+      total:
+        products.length,
+
+      listed:
+        listedCount,
+
+      blocked:
+        blockedCount,
+
+      skipped:
+        skippedCount,
     },
 
-    products: runResults,
+    products:
+      runResults,
   };
 
   previousResults.push(
     runRecord
   );
+
+  // --------------------------------------------------
+  // THIS IS THE REPORTING FILE
+  // --------------------------------------------------
+  //
+  // It remains separate from processed-state.json.
+  // --------------------------------------------------
 
   saveResults(
     previousResults
@@ -489,21 +535,28 @@ async function main() {
     runResults
       .filter(
         (item) =>
-          item.status === "blocked"
+          item.status ===
+          "blocked"
       )
       .map(
         (item) => ({
           productCode:
             item.productCode,
 
+          poNumber:
+            item.poNumber ||
+            null,
+
           reason:
             item.reason,
 
           missing:
-            item.missing || [],
+            item.missing ||
+            [],
 
           error:
-            item.error || null,
+            item.error ||
+            null,
 
           date:
             item.date,
@@ -549,9 +602,9 @@ async function main() {
 
   console.log("");
 
-  // ------------------------------------------------
+  // --------------------------------------------------
   // SHOW BLOCKED PRODUCTS
-  // ------------------------------------------------
+  // --------------------------------------------------
 
   if (
     blockedProducts.length > 0
@@ -574,29 +627,29 @@ async function main() {
           `  ${item.productCode}`
         );
 
+        if (item.poNumber) {
+          console.log(
+            `    PO: ${item.poNumber}`
+          );
+        }
+
         console.log(
-          `    Reason: ${
-            item.reason
-          }`
+          `    Reason: ${item.reason}`
         );
 
         if (
           item.missing.length > 0
         ) {
           console.log(
-            `    Missing: ${
-              item.missing.join(
-                ", "
-              )
-            }`
+            `    Missing: ${item.missing.join(
+              ", "
+            )}`
           );
         }
 
         if (item.error) {
           console.log(
-            `    Error: ${
-              item.error
-            }`
+            `    Error: ${item.error}`
           );
         }
 
@@ -623,47 +676,7 @@ async function main() {
     "========================================"
   );
 }
-// --------------------------------------------------
-// GET ACTIVE PO FOR PRODUCT
-// --------------------------------------------------
 
-function getActivePOForProduct(
-  productCode,
-  state
-) {
-  const normalizedCode =
-    String(productCode || "")
-      .trim()
-      .toUpperCase();
-
-  const possibleKeys = [
-    `title:${normalizedCode}`,
-    `bom:${normalizedCode}`,
-  ];
-
-  for (const key of possibleKeys) {
-    const entry = state[key];
-
-    if (
-      entry &&
-      entry.done === true &&
-      entry.poNumber
-    ) {
-      return {
-        poNumber:
-          String(entry.poNumber)
-            .trim()
-            .toUpperCase(),
-
-        stateKey: key,
-
-        stateEntry: entry,
-      };
-    }
-  }
-
-  return null;
-}
 // --------------------------------------------------
 // RUN
 // --------------------------------------------------

@@ -27,7 +27,6 @@ function log(type, msg) {
 // TRADEVINE OAUTH
 // ==================================================
 
-// WLG tradevine credentials — used ONLY for ShopifyProduct
 const oauth = OAuth({
   consumer: {
     key: process.env.WLG_TV_CONSUMER_KEY,
@@ -43,8 +42,7 @@ const token = {
   secret: process.env.WLG_TV_ACCESS_TOKEN_SECRET,
 };
 
-// AKL tradevine credentials — used ONLY for ShopifyProduct
-// (tag/title) cleanup, since Shopify is only enabled on AKL.
+// AKL credentials — used ONLY for ShopifyProduct tag/title cleanup
 const aklOauth = OAuth({
   consumer: {
     key: process.env.TV_CONSUMER_KEY,
@@ -64,12 +62,20 @@ const aklToken = {
 // FILES
 // ==================================================
 
-const STATE_FILE = path.join(__dirname, "../json/WLG/processed-state-wlg.json");
-const GRADUATION_FILE = path.join(__dirname, "../json/WLG/graduated-this-week-wlg.json");
+const STATE_FILE = path.join(
+  __dirname,
+  "../json/WLG/processed-state-wlg.json"
+);
+
+const GRADUATION_FILE = path.join(
+  __dirname,
+  "../json/WLG/graduated-this-week-wlg.json"
+);
 
 // ==================================================
 // WLG SETTINGS
 // ==================================================
+
 const TV_API = "https://api.tradevine.com";
 
 const SHOPIFY_STORE = process.env.SHOPIFY_STORE;
@@ -77,6 +83,7 @@ const SHOPIFY_TOKEN = process.env.SHOPIFY_ACCESS_TOKEN;
 const API_VERSION = "2026-07";
 
 const SHOPIFY_TAG = "Pre-Order-Wellington";
+
 const SHOPIFY_METAFIELD_NAMESPACE = "stock";
 const SHOPIFY_METAFIELD_KEY = "wlg_arriving_date";
 
@@ -166,10 +173,112 @@ function saveGraduationHistory(history) {
 }
 
 // ==================================================
+// CURRENT CYCLE HELPERS
+// ==================================================
+//
+// IMPORTANT:
+// inv:PO:PRODUCT records are historical records.
+//
+// Example:
+// inv:PO1560:PR13374
+// inv:PO1580:PR13374
+//
+// The newest completed inv record is considered
+// the current cycle.
+//
+// We NEVER delete these inv records.
+
+// ==================================================
+// GET ALL COMPLETED CYCLES FOR PRODUCT
+// ==================================================
+
+function getCompletedCyclesForProduct(productCode, state) {
+  const cycles = [];
+  const targetCode = String(productCode).trim().toUpperCase();
+
+  for (const [key, value] of Object.entries(state)) {
+    if (!key.startsWith("inv:")) {
+      continue;
+    }
+
+    const parts = key.split(":");
+
+    // Expected: inv:PO1560:PR13374
+    if (parts.length !== 3) {
+      continue;
+    }
+
+    const poNumber = parts[1];
+    const code = parts[2];
+
+    if (String(code).trim().toUpperCase() !== targetCode) {
+      continue;
+    }
+
+    if (value?.done !== true) {
+      continue;
+    }
+
+    const date = value?.date || value?.processedDate || null;
+
+    cycles.push({
+      productCode: code,
+      poNumber,
+      date,
+      supplier: value?.supplier || "",
+      stateKey: key,
+    });
+  }
+
+  // Newest first
+  cycles.sort((a, b) => {
+    const aTime = Date.parse(a.date || "");
+    const bTime = Date.parse(b.date || "");
+    return (Number.isNaN(bTime) ? 0 : bTime) - (Number.isNaN(aTime) ? 0 : aTime);
+  });
+
+  return cycles;
+}
+
+// ==================================================
+// GET CURRENT CYCLE FOR STANDALONE PRODUCT
+// ==================================================
+
+function getCurrentCycleForProduct(productCode, state) {
+  const cycles = getCompletedCyclesForProduct(productCode, state);
+
+  if (cycles.length === 0) {
+    return null;
+  }
+
+  return cycles[0];
+}
+
+// ==================================================
+// CHECK IF PRODUCT + PO ALREADY GRADUATED
+// ==================================================
+
+function hasGraduatedCycle(productCode, poNumber) {
+  const history = loadGraduationHistory();
+
+  return history.some((entry) => {
+    const sameProduct =
+      String(entry.productCode || "").trim().toUpperCase() ===
+      String(productCode || "").trim().toUpperCase();
+
+    const samePO =
+      String(entry.poNumber || "").trim().toUpperCase() ===
+      String(poNumber || "").trim().toUpperCase();
+
+    return sameProduct && samePO;
+  });
+}
+
+// ==================================================
 // RECORD GRADUATION
 // ==================================================
 
-function recordGraduation(product, type) {
+function recordGraduation(product, type, poNumber) {
   if (!product) {
     return;
   }
@@ -183,10 +292,26 @@ function recordGraduation(product, type) {
 
   const history = loadGraduationHistory();
 
-  const filteredHistory = history.filter(
-    (entry) =>
-      String(entry.productCode || "").toUpperCase() !== productCode.toUpperCase()
-  );
+  // Do not overwrite another PO cycle.
+  // Cycle 1: PR13374 + PO1560
+  // Cycle 2: PR13374 + PO1580
+  // Both are retained.
+
+  const alreadyExists = history.some((entry) => {
+    const sameProduct =
+      String(entry.productCode || "").toUpperCase() === productCode.toUpperCase();
+
+    const samePO =
+      String(entry.poNumber || "").toUpperCase() ===
+      String(poNumber || "").toUpperCase();
+
+    return sameProduct && samePO;
+  });
+
+  if (alreadyExists) {
+    console.log(`    ${productCode} / ${poNumber}: graduation already recorded`);
+    return;
+  }
 
   const supplier =
     product.SupplierName || product.Supplier || product.Supplier?.Name || "";
@@ -197,18 +322,21 @@ function recordGraduation(product, type) {
     date: new Date().toISOString(),
     supplier: String(supplier || ""),
     type,
+    poNumber: poNumber || product.PONumber || product.PurchaseOrderNumber || null,
   };
 
-  if (product.PONumber || product.PurchaseOrderNumber) {
-    record.poNumber = product.PONumber || product.PurchaseOrderNumber;
-  }
-
-  filteredHistory.push(record);
-  saveGraduationHistory(filteredHistory);
+  history.push(record);
+  saveGraduationHistory(history);
 
   console.log("");
-  console.log(`    ✓ ${productCode} saved to graduated-this-week-wlg.json`);
-  log("success", `${productCode}: graduation recorded in graduated-this-week-wlg.json`);
+  console.log(
+    `    ✓ ${productCode} / ${record.poNumber || "UNKNOWN PO"} saved to graduated-this-week-wlg.json`
+  );
+
+  log(
+    "success",
+    `${productCode} / ${record.poNumber || "UNKNOWN PO"}: graduation recorded`
+  );
 }
 
 // ==================================================
@@ -352,28 +480,59 @@ async function apiPost(url, body) {
   }
 }
 
+// ==================================================
+// AKL TRADEVINE GET
+// ==================================================
+
 async function aklApiGet(url) {
   const authHeader = aklOauth.toHeader(
-    aklOauth.authorize({ url, method: "GET" }, aklToken)
+    aklOauth.authorize(
+      {
+        url,
+        method: "GET",
+      },
+      aklToken
+    )
   );
 
   const res = await fetch(url, {
     method: "GET",
-    headers: { ...authHeader, Accept: "application/json" },
+    headers: {
+      ...authHeader,
+      Accept: "application/json",
+    },
   });
 
   const text = await res.text();
 
   try {
-    return { status: res.status, data: JSONbig.parse(text), raw: text };
+    return {
+      status: res.status,
+      data: JSONbig.parse(text),
+      raw: text,
+    };
   } catch {
-    return { status: res.status, data: null, raw: text };
+    return {
+      status: res.status,
+      data: null,
+      raw: text,
+    };
   }
 }
 
+// ==================================================
+// AKL TRADEVINE POST
+// ==================================================
+
 async function aklApiPost(url, body) {
   const authHeader = aklOauth.toHeader(
-    aklOauth.authorize({ url, method: "POST" }, aklToken)
+    aklOauth.authorize(
+      {
+        url,
+        method: "POST",
+      },
+      aklToken
+    )
   );
 
   const res = await fetch(url, {
@@ -389,9 +548,17 @@ async function aklApiPost(url, body) {
   const text = await res.text();
 
   try {
-    return { status: res.status, data: JSONbig.parse(text), raw: text };
+    return {
+      status: res.status,
+      data: JSONbig.parse(text),
+      raw: text,
+    };
   } catch {
-    return { status: res.status, data: null, raw: text };
+    return {
+      status: res.status,
+      data: null,
+      raw: text,
+    };
   }
 }
 
@@ -439,48 +606,32 @@ async function shopifyGraphQL(query, variables = {}) {
 
 async function getProductByCode(code) {
   const url =
-    `https://api.tradevine.com/v1/Product` +
+    `${TV_API}/v1/Product` +
     `?code=${encodeURIComponent(code)}` +
     `&pageSize=10`;
 
   const result = await apiGet(url);
 
   if (result.status !== 200 || !result.data) {
-    console.log(
-      `${code}: Tradevine Product lookup failed — HTTP ${result.status}`
-    );
-
-    console.log(
-      (result.raw || "").slice(0, 500)
-    );
-
+    console.log(`${code}: Tradevine Product lookup failed — HTTP ${result.status}`);
+    console.log((result.raw || "").slice(0, 500));
     return null;
   }
 
-  const list =
-    result.data.List ||
-    result.data.list ||
-    result.data;
+  const list = result.data.List || result.data.list || result.data;
 
   if (!Array.isArray(list)) {
-    console.log(
-      `${code}: Tradevine Product response did not contain a product list`
-    );
-
+    console.log(`${code}: Tradevine Product response did not contain a product list`);
     return null;
   }
 
   const product = list.find(
     (item) =>
-      String(item.Code || "").toUpperCase() ===
-      String(code).toUpperCase()
+      String(item.Code || "").toUpperCase() === String(code).toUpperCase()
   );
 
   if (!product) {
-    console.log(
-      `${code}: product not found in Tradevine`
-    );
-
+    console.log(`${code}: product not found in Tradevine`);
     return null;
   }
 
@@ -521,7 +672,7 @@ async function zeroOutPreOrderStock(product, state) {
     return true;
   }
 
-  const url = "https://api.tradevine.com/v1/ProductInventory/MakeAdjustment";
+  const url = `${TV_API}/v1/ProductInventory/MakeAdjustment`;
 
   const body = {
     ProductCode: product.Code,
@@ -566,7 +717,7 @@ async function stripDsPrefix(product) {
 
   const newName = currentName.replace(/^DS\s+/i, "");
 
-  const url = `https://api.tradevine.com/v1/Product/${product.ProductID}`;
+  const url = `${TV_API}/v1/Product/${product.ProductID}`;
 
   const result = await apiPost(url, {
     ...product,
@@ -652,29 +803,23 @@ async function getShopifyProductState(productGid) {
 
   return result.data?.product || null;
 }
-/* =========================================================
-   REMOVE PRE-ORDER WELLINGTON TAG
-========================================================= */
+
+// ==================================================
+// REMOVE PRE-ORDER WELLINGTON TAG
+// ==================================================
 
 function removePreOrderTag(tagsString) {
   return (tagsString || "")
     .split(",")
     .map((tag) => tag.trim())
     .filter(Boolean)
-    .filter(
-      (tag) =>
-        tag.toLowerCase() !==
-        "pre-order-wellington"
-    )
+    .filter((tag) => tag.toLowerCase() !== "pre-order-wellington")
     .join(", ");
 }
 
-/* =========================================================
-   FIND TRADEVINE SHOPIFY PRODUCT RECORD
-
-   IMPORTANT:
-   Search by ProductCode instead of Tradevine ProductID.
-========================================================= */
+// ==================================================
+// FIND TRADEVINE SHOPIFY PRODUCT RECORD
+// ==================================================
 
 async function getShopifyProductRecord(productCode) {
   const url =
@@ -690,10 +835,7 @@ async function getShopifyProductRecord(productCode) {
     return null;
   }
 
-  const list =
-    result.data.List ||
-    result.data.list ||
-    [];
+  const list = result.data.List || result.data.list || [];
 
   if (!Array.isArray(list)) {
     log("warn", `${productCode}: ShopifyProduct response did not contain a list`);
@@ -713,68 +855,57 @@ async function getShopifyProductRecord(productCode) {
 
   log(
     "info",
-    `${productCode}: ShopifyProduct found — ShopifyProductID ${String(record.ShopifyProductID)}`
+    `${productCode}: ShopifyProduct found — ShopifyProductID ${String(
+      record.ShopifyProductID
+    )}`
   );
 
   return record;
 }
+
+// ==================================================
+// CLEAN TRADEVINE SHOPIFY PRODUCT
+// ==================================================
+
 async function stripDsPrefixAndTagFromShopify(productCode) {
-  const record =
-    await getShopifyProductRecord(productCode);
+  const record = await getShopifyProductRecord(productCode);
 
   if (!record) {
     log(
       "info",
       `${productCode}: no ShopifyProduct record — skipping Shopify tab cleanup`
     );
-
     return true;
   }
 
   const updates = {};
 
   // Remove DS from Shopify tab title
-  if (
-    typeof record.Title === "string" &&
-    /^DS\s+/i.test(record.Title)
-  ) {
-    updates.Title =
-      record.Title.replace(/^DS\s+/i, "");
+  if (typeof record.Title === "string" && /^DS\s+/i.test(record.Title)) {
+    updates.Title = record.Title.replace(/^DS\s+/i, "");
   }
 
-  // Remove Pre-Order-Wellington
-  const cleanedTags =
-    removePreOrderTag(record.Tags);
+  // Remove WLG tag
+  const cleanedTags = removePreOrderTag(record.Tags);
 
-  if (
-    cleanedTags !==
-    (record.Tags || "").trim()
-  ) {
+  if (cleanedTags !== (record.Tags || "").trim()) {
     updates.Tags = cleanedTags;
   }
 
   if (Object.keys(updates).length === 0) {
-    log(
-      "info",
-      `${productCode}: Shopify tab already clean (title/tags)`
-    );
-
+    log("info", `${productCode}: Shopify tab already clean (title/tags)`);
     return true;
   }
 
-  const shopifyProductId =
-    String(record.ShopifyProductID);
-
-  const url =
-    `${TV_API}/v1/ShopifyProduct/${shopifyProductId}`;
+  const shopifyProductId = String(record.ShopifyProductID);
+  const url = `${TV_API}/v1/ShopifyProduct/${shopifyProductId}`;
 
   const body = {
     ...record,
     ...updates,
   };
 
-  const result =
-    await aklApiPost(url, body);
+  const result = await aklApiPost(url, body);
 
   if (result.status !== 200) {
     log(
@@ -783,65 +914,39 @@ async function stripDsPrefixAndTagFromShopify(productCode) {
         result.raw || ""
       }`.slice(0, 500)
     );
-
     return false;
   }
 
   log(
     "success",
-    `${productCode}: Shopify tab updated (${Object.keys(
-      updates
-    ).join(", ")})`
+    `${productCode}: Shopify tab updated (${Object.keys(updates).join(", ")})`
   );
 
-  // Re-fetch from Tradevine to verify (this is the AKL-side ShopifyProduct record —
-  // separate from the later Shopify-direct tag/metafield check in verifyShopifyCleanup)
-  const verifiedRecord =
-    await getShopifyProductRecord(productCode);
+  // Verify
+  const verifiedRecord = await getShopifyProductRecord(productCode);
 
   if (!verifiedRecord) {
-    log(
-      "error",
-      `${productCode}: could not verify Shopify tab after update`
-    );
-
+    log("error", `${productCode}: could not verify Shopify tab after update`);
     return false;
   }
 
-  const titleClean =
-    !/^DS\s+/i.test(
-      verifiedRecord.Title || ""
-    );
+  const titleClean = !/^DS\s+/i.test(verifiedRecord.Title || "");
+  const tagList = (verifiedRecord.Tags || "")
+    .split(",")
+    .map((tag) => tag.trim().toLowerCase())
+    .filter(Boolean);
 
-  const tagList =
-    (verifiedRecord.Tags || "")
-      .split(",")
-      .map((tag) =>
-        tag.trim().toLowerCase()
-      )
-      .filter(Boolean);
-
-  const tagClean =
-    !tagList.includes(
-      "pre-order-wellington"
-    );
+  const tagClean = !tagList.includes("pre-order-wellington");
 
   if (!titleClean || !tagClean) {
-    log(
-      "error",
-      `${productCode}: Shopify tab verification FAILED`
-    );
-
+    log("error", `${productCode}: Shopify tab verification FAILED`);
     return false;
   }
 
-  log(
-    "success",
-    `${productCode}: Shopify tab cleanup VERIFIED`
-  );
-
+  log("success", `${productCode}: Shopify tab cleanup VERIFIED`);
   return true;
 }
+
 // ==================================================
 // DELETE WLG ARRIVING DATE
 // ==================================================
@@ -919,171 +1024,22 @@ async function verifyShopifyCleanup(productGid) {
     return false;
   }
 
-  const tags = Array.isArray(product.tags)
-    ? product.tags
-    : [];
+  const tags = Array.isArray(product.tags) ? product.tags : [];
 
-  // ----------------------------------------------
-  // VERIFY WLG TAG
-  // ----------------------------------------------
-
+  // Verify WLG tag
   const tagStillExists = tags.some(
     (tag) =>
-      String(tag).trim().toLowerCase() ===
-      "pre-order-wellington"
+      String(tag).trim().toLowerCase() === "pre-order-wellington"
   );
 
   if (tagStillExists) {
-    console.log(
-      `    ${SHOPIFY_TAG} still exists on Shopify — verification FAILED`
-    );
-
+    console.log(`    ${SHOPIFY_TAG} still exists on Shopify — verification FAILED`);
     return false;
   }
 
-  console.log(
-    `    ${SHOPIFY_TAG} removed ✓`
-  );
+  console.log(`${SHOPIFY_TAG} removed ✓`);
 
-  // ----------------------------------------------
-  // VERIFY ARRIVING DATE METAFIELD
-  // ----------------------------------------------
-
-  const metafield = product.metafield;
-
-  if (metafield) {
-    console.log(
-      `    ${SHOPIFY_METAFIELD_NAMESPACE}.${SHOPIFY_METAFIELD_KEY} still exists — verification FAILED`
-    );
-
-    console.log(
-      `    Existing value: ${metafield.value}`
-    );
-
-    return false;
-  }
-
-  console.log(
-    `    ${SHOPIFY_METAFIELD_NAMESPACE}.${SHOPIFY_METAFIELD_KEY} removed ✓`
-  );
-
-  return true;
-}
-
-/// ==================================================
-// SHOPIFY GRADUATION CLEANUP
-// ==================================================
-//
-// IMPORTANT:
-// - Title + Pre-Order-Wellington tag are cleaned through
-//   Tradevine /ShopifyProduct, matching the working
-//   WLG → AKL tagging script.
-// - The arriving-date metafield is cleaned through Shopify
-//   GraphQL because it is a Shopify metafield.
-// ==================================================
-
-async function runShopifyCleanup(productCode) {
-  console.log("");
-  console.log(`    ${productCode}: starting Shopify cleanup`);
-
-  // --------------------------------------------------
-  // 1. CLEAN TRADEVINE SHOPIFY TAB
-  // --------------------------------------------------
-  //
-  // This removes:
-  // - DS from Shopify tab title
-  // - Pre-Order-Wellington tag
-  //
-  // This uses the same method as the working
-  // WLG → AKL tagging script.
-  //
-
-  const shopifyTabOk = await stripDsPrefixAndTagFromShopify(productCode);
-
-  if (!shopifyTabOk) {
-    console.log(
-      `    ${productCode}: BLOCKED — Tradevine ShopifyProduct cleanup failed`
-    );
-    return false;
-  }
-
-  console.log(
-    `    ${productCode}: Tradevine ShopifyProduct cleanup verified ✓`
-  );
-
-  // --------------------------------------------------
-  // 2. FIND ACTUAL SHOPIFY PRODUCT
-  // --------------------------------------------------
-  //
-  // We only use GraphQL here to obtain the Shopify
-  // Product GID required for metafield deletion.
-  //
-
-  const shopifyProduct = await findShopifyProductBySku(productCode);
-
-  if (!shopifyProduct) {
-    console.log(
-      `    ${productCode}: Shopify product could not be found for arriving-date cleanup`
-    );
-    return false;
-  }
-
-  console.log(`    Shopify product: ${shopifyProduct.title}`);
-  console.log(`    Shopify ID: ${shopifyProduct.id}`);
-
-  // --------------------------------------------------
-  // 3. DELETE WELLINGTON ARRIVING DATE
-  // --------------------------------------------------
-
-  const metafieldOk = await deleteWellingtonArrivingDate(shopifyProduct.id);
-
-  if (!metafieldOk) {
-    console.log(
-      `    ${productCode}: Shopify arriving-date deletion FAILED`
-    );
-    return false;
-  }
-
-  // --------------------------------------------------
-  // 4. VERIFY ARRIVING DATE
-  // --------------------------------------------------
-  //
-  // We deliberately verify only the metafield here.
-  // The tag/title were already verified against the
-  // Tradevine ShopifyProduct record above.
-  //
-
-  const verified = await verifyShopifyCleanup(shopifyProduct.id);
-
-  if (!verified) {
-    console.log(
-      `    ${productCode}: Shopify arriving-date verification FAILED`
-    );
-    return false;
-  }
-
-  console.log(
-    `    ${productCode}: Shopify cleanup fully verified ✓`
-  );
-
-  return true;
-}
-// ==================================================
-// VERIFY SHOPIFY METAFIELD CLEANUP
-// ==================================================
-
-async function verifyShopifyMetafieldCleanup(productGid) {
-  const product = await getShopifyProductState(productGid);
-
-  if (!product) {
-    console.log("    Shopify product verification failed");
-    return false;
-  }
-
-  // ----------------------------------------------
-  // VERIFY ARRIVING DATE METAFIELD
-  // ----------------------------------------------
-
+  // Verify metafield
   const metafield = product.metafield;
 
   if (metafield) {
@@ -1098,6 +1054,59 @@ async function verifyShopifyMetafieldCleanup(productGid) {
     `    ${SHOPIFY_METAFIELD_NAMESPACE}.${SHOPIFY_METAFIELD_KEY} removed ✓`
   );
 
+  return true;
+}
+
+// ==================================================
+// SHOPIFY GRADUATION CLEANUP
+// ==================================================
+
+async function runShopifyCleanup(productCode) {
+  console.log("");
+  console.log(`    ${productCode}: starting Shopify cleanup`);
+
+  // 1. TRADEVINE SHOPIFY TAB
+  const shopifyTabOk = await stripDsPrefixAndTagFromShopify(productCode);
+
+  if (!shopifyTabOk) {
+    console.log(
+      `    ${productCode}: BLOCKED — Tradevine ShopifyProduct cleanup failed`
+    );
+    return false;
+  }
+
+  console.log(`    ${productCode}: Tradevine ShopifyProduct cleanup verified ✓`);
+
+  // 2. FIND ACTUAL SHOPIFY PRODUCT
+  const shopifyProduct = await findShopifyProductBySku(productCode);
+
+  if (!shopifyProduct) {
+    console.log(
+      `    ${productCode}: Shopify product could not be found for arriving-date cleanup`
+    );
+    return false;
+  }
+
+  console.log(`    Shopify product: ${shopifyProduct.title}`);
+  console.log(`    Shopify ID: ${shopifyProduct.id}`);
+
+  // 3. DELETE WELLINGTON ARRIVING DATE
+  const metafieldOk = await deleteWellingtonArrivingDate(shopifyProduct.id);
+
+  if (!metafieldOk) {
+    console.log(`    ${productCode}: Shopify arriving-date deletion FAILED`);
+    return false;
+  }
+
+  // 4. FINAL VERIFICATION
+  const verified = await verifyShopifyCleanup(shopifyProduct.id);
+
+  if (!verified) {
+    console.log(`    ${productCode}: Shopify arriving-date verification FAILED`);
+    return false;
+  }
+
+  console.log(`    ${productCode}: Shopify cleanup fully verified ✓`);
   return true;
 }
 
@@ -1127,6 +1136,28 @@ async function processStandaloneProduct(code, state) {
     return;
   }
 
+  // Current cycle
+  const currentCycle = getCurrentCycleForProduct(code, state);
+
+  if (!currentCycle) {
+    console.log(`${code}: no completed inventory cycle found — skipping`);
+    log("info", `${code}: no completed inventory cycle found`);
+    return;
+  }
+
+  const currentPO = currentCycle.poNumber;
+
+  console.log(`    Current presale cycle: ${currentPO}`);
+  log("info", `${code}: current cycle = ${currentPO}`);
+
+  // Already graduated?
+  if (hasGraduatedCycle(code, currentPO)) {
+    console.log(`    ${code}: already graduated for ${currentPO} — skipping`);
+    log("info", `${code} / ${currentPO}: already graduated`);
+    return;
+  }
+
+  // Get product
   let product = await getProductByCode(code);
 
   if (!product) {
@@ -1134,14 +1165,16 @@ async function processStandaloneProduct(code, state) {
     return;
   }
 
+  // NZ MADE
   if (isExcludedByTitle(product.Name)) {
     console.log(`${code}: title contains "NZ MADE" — excluded, skipping`);
     return;
   }
 
+  // Real stock
   const realStock = hasRealWarehouseStock(product);
 
-  log("info", `${code}: hasRealStock = ${realStock}`);
+  log("info", `${code}: current cycle ${currentPO}, hasRealStock = ${realStock}`);
 
   if (!realStock) {
     console.log(`  ${code}: still presale-only — no action`);
@@ -1150,6 +1183,7 @@ async function processStandaloneProduct(code, state) {
 
   console.log(`  ${code}: REAL warehouse stock detected ✓`);
 
+  // Clear pre-order stock
   const zeroOk = await zeroOutPreOrderStock(product, state);
 
   if (!zeroOk) {
@@ -1157,8 +1191,15 @@ async function processStandaloneProduct(code, state) {
     return;
   }
 
+  // Refresh product
   product = await getProductByCode(code);
 
+  if (!product) {
+    console.log(`  ${code}: product could not be reloaded after stock cleanup`);
+    return;
+  }
+
+  // Remove DS
   const titleOk = await stripDsPrefix(product);
 
   if (!titleOk) {
@@ -1166,6 +1207,7 @@ async function processStandaloneProduct(code, state) {
     return;
   }
 
+  // Shopify cleanup
   const shopifyOk = await runShopifyCleanup(code);
 
   if (!shopifyOk) {
@@ -1173,15 +1215,30 @@ async function processStandaloneProduct(code, state) {
     return;
   }
 
+  // Final refresh
   product = await getProductByCode(code);
 
-  recordGraduation(product, "standalone");
+  if (!product) {
+    console.log(`  ${code}: final product lookup failed`);
+    return;
+  }
+
+  // Record graduation
+  //
+  // IMPORTANT:
+  // Record product + CURRENT PO.
+
+  recordGraduation(product, "standalone", currentPO);
+
+  // Remove temporary state
+  //
+  // DO NOT REMOVE inv:PO:PRODUCT
 
   delete state[`title:${code}`];
   delete state[`warehouse:${code}`];
 
-  console.log(`  ${code}: WLG presale cleanup completed ✓`);
-  log("success", `${code}: WLG presale cleanup completed`);
+  console.log(`  ${code}: WLG presale cleanup completed for ${currentPO} ✓`);
+  log("success", `${code} / ${currentPO}: WLG presale cleanup completed`);
 }
 
 // ==================================================
@@ -1205,10 +1262,24 @@ async function processBomParent(parentCode, state) {
     return;
   }
 
+  // NZ MADE
   if (isExcludedByTitle(parent.Name)) {
     console.log(`${parentCode}: title contains "NZ MADE" — excluded, skipping`);
     return;
   }
+
+  // KEEP EXISTING WORKING BOM LOGIC
+  //
+  // IMPORTANT:
+  // Do NOT change this to another guessed field.
+  //
+  // Your working API returns:
+  //
+  // parent.BoMComponents
+  //
+  // and each component contains:
+  //
+  // component.BoMComponentProductCode
 
   const components = (parent.BoMComponents || []).filter(
     (component) => component.BoMComponentProductCode
@@ -1221,6 +1292,60 @@ async function processBomParent(parentCode, state) {
 
   console.log(`${parentCode}: checking ${components.length} child component(s)...`);
 
+  // DETERMINE CURRENT BOM CYCLE
+  //
+  // Each child has:
+  //
+  // inv:PO:CHILD
+  //
+  // We use the newest completed cycle for each child.
+  //
+  // All children must belong to the same PO.
+
+  const childCycles = [];
+
+  for (const component of components) {
+    const childCode = component.BoMComponentProductCode;
+
+    const childCycle = getCurrentCycleForProduct(childCode, state);
+
+    if (!childCycle) {
+      console.log(`  ${childCode}: no completed inventory cycle found`);
+      return;
+    }
+
+    childCycles.push({
+      childCode,
+      cycle: childCycle,
+    });
+  }
+
+  const childPOs = [...new Set(childCycles.map((item) => String(item.cycle.poNumber)))];
+
+  if (childPOs.length !== 1) {
+    console.log(
+      `  ${parentCode}: BLOCKED — BOM children belong to different PO cycles: ${childPOs.join(
+        ", "
+      )}`
+    );
+
+    log("warn", `${parentCode}: BOM children have mixed PO cycles`);
+    return;
+  }
+
+  const currentPO = childPOs[0];
+
+  console.log(`    Current BOM presale cycle: ${currentPO}`);
+  log("info", `${parentCode}: current BOM cycle = ${currentPO}`);
+
+  // Already graduated?
+  if (hasGraduatedCycle(parentCode, currentPO)) {
+    console.log(`    ${parentCode}: already graduated for ${currentPO} — skipping`);
+    log("info", `${parentCode} / ${currentPO}: already graduated`);
+    return;
+  }
+
+  // Fetch child products
   const childProducts = [];
   let allChildrenReady = true;
 
@@ -1230,6 +1355,19 @@ async function processBomParent(parentCode, state) {
 
     if (!child) {
       console.log(`  ${childCode}: not found — not ready`);
+      allChildrenReady = false;
+      continue;
+    }
+
+    // Supplier protection
+    if (isBlocked(childCode, state)) {
+      allChildrenReady = false;
+      continue;
+    }
+
+    // NZ MADE protection
+    if (isExcludedByTitle(child.Name)) {
+      console.log(`  ${childCode}: NZ MADE — not ready`);
       allChildrenReady = false;
       continue;
     }
@@ -1244,6 +1382,7 @@ async function processBomParent(parentCode, state) {
     }
   }
 
+  // All children must have real stock
   if (!allChildrenReady) {
     console.log(`  ${parentCode}: not all children have real stock yet — no action`);
     return;
@@ -1251,6 +1390,7 @@ async function processBomParent(parentCode, state) {
 
   console.log(`  ${parentCode}: all children have real stock ✓`);
 
+  // Clear pre-order stock on children
   for (const child of childProducts) {
     const childZeroOk = await zeroOutPreOrderStock(child, state);
 
@@ -1262,13 +1402,27 @@ async function processBomParent(parentCode, state) {
     }
   }
 
+  // Refresh parent
   const freshParent = await getProductByCode(parentCode);
+
+  if (!freshParent) {
+    console.log(`  ${parentCode}: parent could not be reloaded`);
+    return;
+  }
+
+  // Remove DS from parent
   const titleOk = await stripDsPrefix(freshParent);
 
   if (!titleOk) {
     console.log(`  ${parentCode}: DS removal failed — stopping`);
     return;
   }
+
+  // Shopify cleanup
+  //
+  // Only parent gets Shopify cleanup.
+  //
+  // Children remain protected as BOM components.
 
   const shopifyOk = await runShopifyCleanup(parentCode);
 
@@ -1277,16 +1431,31 @@ async function processBomParent(parentCode, state) {
     return;
   }
 
+  // Final parent refresh
   const finalParent = await getProductByCode(parentCode);
 
-  recordGraduation(finalParent, "bom");
+  if (!finalParent) {
+    console.log(`  ${parentCode}: final parent lookup failed`);
+    return;
+  }
+
+  // Record BOM graduation
+  //
+  // IMPORTANT:
+  // Product + PO.
+
+  recordGraduation(finalParent, "bom", currentPO);
+
+  // Remove temporary parent state
+  //
+  // DO NOT REMOVE inv:PO:CHILD.
 
   delete state[`title:${parentCode}`];
   delete state[`bom:${parentCode}`];
   delete state[`warehouse:${parentCode}`];
 
-  console.log(`  ${parentCode}: WLG BOM presale cleanup completed ✓`);
-  log("success", `${parentCode}: WLG BOM presale cleanup completed`);
+  console.log(`  ${parentCode}: WLG BOM presale cleanup completed for ${currentPO} ✓`);
+  log("success", `${parentCode} / ${currentPO}: WLG BOM presale cleanup completed`);
 }
 
 // ==================================================
@@ -1299,6 +1468,7 @@ async function main() {
   console.log(" WLG PRESALE CLEANUP");
   console.log(" INVENTORY + TITLE + TAG + DELIVERY DATE");
   console.log(" + GRADUATION HISTORY");
+  console.log(" + CYCLE 1 / CYCLE 2 SUPPORT");
   console.log("==============================================");
   console.log("");
 
@@ -1310,10 +1480,13 @@ async function main() {
   console.log(`Graduation file: ${GRADUATION_FILE}`);
   console.log("");
 
+  // Clean old graduation history
   cleanGraduationHistory();
 
+  // Load state
   const state = loadState();
 
+  // Standalone products
   const standaloneCodes = Object.keys(state)
     .filter((key) => key.startsWith("title:"))
     .map((key) => key.replace("title:", ""))
@@ -1334,6 +1507,7 @@ async function main() {
     }
   }
 
+  // BOM parents
   const bomParentCodes = Object.keys(state)
     .filter((key) => key.startsWith("bom:"))
     .map((key) => key.replace("bom:", ""));
@@ -1354,6 +1528,7 @@ async function main() {
     }
   }
 
+  // Save state
   saveState(state);
 
   console.log("");

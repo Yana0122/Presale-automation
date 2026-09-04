@@ -45,5 +45,45 @@
     "done": true,
     "date": "2026-09-02T00:32:59.391Z",
     "supplier": "Test Supplier for Shopify"
+  },
+  "blocked:PO1560:PR15242-A": {
+    "poNumber": "PO1560",
+    "supplier": "Test Supplier for Shopify",
+    "reason": "Missing price",
+    "detectedAt": "2026-09-03T22:49:08.612Z",
+    "productCode": "PR15242-A"
+  },
+  "blocked:PO1560:PR15242-B": {
+    "poNumber": "PO1560",
+    "supplier": "Test Supplier for Shopify",
+    "reason": "Missing price",
+    "detectedAt": "2026-09-03T22:49:08.618Z",
+    "productCode": "PR15242-B"
+  },
+  "blocked:PO1560:PR15242": {
+    "poNumber": "PO1560",
+    "supplier": "Test Supplier for Shopify",
+    "reason": "Missing price",
+    "detectedAt": "2026-09-03T22:49:08.880Z",
+    "productCode": "PR15242"
+  },
+  "blocked:PO1560:PR13374": {
+    "poNumber": "PO1560",
+    "supplier": "Test Supplier for Shopify",
+    "reason": "Missing price",
+    "detectedAt": "2026-09-03T22:49:08.884Z",
+    "productCode": "PR13374"
+  },
+  "inv:PO1560:PO1560:PR15241": {
+    "done": true,
+    "date": "2026-09-04T01:34:01.362Z",
+    "supplier": "Test Supplier for Shopify",
+    "note": "manually actioned by staff via dashboard"
+  },
+  "title:PO1560:PR15241": {
+    "done": true,
+    "date": "2026-09-04T01:34:01.362Z",
+    "supplier": "Test Supplier for Shopify",
+    "note": "manually actioned by staff via dashboard"
   }
 }

@@ -167,5 +167,208 @@
         }
       }
     ]
+  },
+  {
+    "runId": "2026-09-03T04-17-49-108Z",
+    "date": "2026-09-03T04:17:49.108Z",
+    "summary": {
+      "total": 2,
+      "listed": 1,
+      "blocked": 1,
+      "skipped": 0
+    },
+    "products": [
+      {
+        "productCode": "PR15242",
+        "poNumber": "PO4447",
+        "status": "listed",
+        "reason": null,
+        "date": "2026-09-03T04:17:49.108Z",
+        "result": {
+          "ok": true,
+          "productCode": "PR15242",
+          "poNumber": "PO4447",
+          "shopifyProductId": "3922781652407524834",
+          "title": "DS Test Website _A",
+          "tags": "Pre-Order-Wellington, Pre-Order-Christchurch, Pre-Order-Auckland",
+          "image": "3922166538736712416.png",
+          "isListed": true
+        }
+      },
+      {
+        "productCode": "PR15241",
+        "poNumber": "PO4447",
+        "status": "blocked",
+        "reason": "validation_failed",
+        "missing": [
+          "image"
+        ],
+        "error": null,
+        "date": "2026-09-03T04:17:49.108Z",
+        "result": {
+          "ok": false,
+          "reason": "validation_failed",
+          "missing": [
+            "image"
+          ],
+          "productCode": "PR15241",
+          "poNumber": "PO4447"
+        }
+      }
+    ]
+  },
+  {
+    "runId": "2026-09-03T23-35-59-255Z",
+    "date": "2026-09-03T23:35:59.255Z",
+    "summary": {
+      "total": 5,
+      "listed": 0,
+      "blocked": 1,
+      "skipped": 4
+    },
+    "products": [
+      {
+        "productCode": "PR15242",
+        "poNumber": "PO4447",
+        "status": "skipped",
+        "reason": "already_listed_for_cycle",
+        "date": "2026-09-03T23:35:59.255Z",
+        "result": {
+          "ok": true,
+          "skipped": true,
+          "reason": "already_listed_for_cycle",
+          "productCode": "PR15242",
+          "poNumber": "PO4447"
+        }
+      },
+      {
+        "productCode": "PR15241",
+        "poNumber": "PO4447",
+        "status": "blocked",
+        "reason": "validation_failed",
+        "missing": [
+          "price"
+        ],
+        "error": null,
+        "date": "2026-09-03T23:35:59.255Z",
+        "result": {
+          "ok": false,
+          "reason": "validation_failed",
+          "missing": [
+            "price"
+          ],
+          "productCode": "PR15241",
+          "poNumber": "PO4447"
+        }
+      },
+      {
+        "productCode": "PR13374",
+        "poNumber": "PO4447",
+        "status": "skipped",
+        "reason": "already_listed_for_cycle",
+        "date": "2026-09-03T23:35:59.255Z",
+        "result": {
+          "ok": true,
+          "skipped": true,
+          "reason": "already_listed_for_cycle",
+          "productCode": "PR13374",
+          "poNumber": "PO4447"
+        }
+      },
+      {
+        "productCode": "PR15301",
+        "poNumber": "PO4447",
+        "status": "skipped",
+        "reason": "already_listed_for_cycle",
+        "date": "2026-09-03T23:35:59.255Z",
+        "result": {
+          "ok": true,
+          "skipped": true,
+          "reason": "already_listed_for_cycle",
+          "productCode": "PR15301",
+          "poNumber": "PO4447"
+        }
+      },
+      {
+        "productCode": "PR15245",
+        "status": "skipped",
+        "reason": "no_active_presale_cycle",
+        "date": "2026-09-03T23:35:59.255Z"
+      }
+    ]
+  },
+  {
+    "runId": "2026-09-04T00-23-37-252Z",
+    "date": "2026-09-04T00:23:37.252Z",
+    "summary": {
+      "total": 5,
+      "listed": 0,
+      "blocked": 0,
+      "skipped": 5
+    },
+    "products": [
+      {
+        "productCode": "PR15242",
+        "poNumber": "PO4447",
+        "status": "skipped",
+        "reason": "already_listed_for_cycle",
+        "date": "2026-09-04T00:23:37.252Z",
+        "result": {
+          "ok": true,
+          "skipped": true,
+          "reason": "already_listed_for_cycle",
+          "productCode": "PR15242",
+          "poNumber": "PO4447"
+        }
+      },
+      {
+        "productCode": "PR15241",
+        "poNumber": "PO4447",
+        "status": "skipped",
+        "reason": "already_listed_for_cycle",
+        "date": "2026-09-04T00:23:37.252Z",
+        "result": {
+          "ok": true,
+          "skipped": true,
+          "reason": "already_listed_for_cycle",
+          "productCode": "PR15241",
+          "poNumber": "PO4447"
+        }
+      },
+      {
+        "productCode": "PR13374",
+        "poNumber": "PO4447",
+        "status": "skipped",
+        "reason": "already_listed_for_cycle",
+        "date": "2026-09-04T00:23:37.252Z",
+        "result": {
+          "ok": true,
+          "skipped": true,
+          "reason": "already_listed_for_cycle",
+          "productCode": "PR13374",
+          "poNumber": "PO4447"
+        }
+      },
+      {
+        "productCode": "PR15301",
+        "poNumber": "PO4447",
+        "status": "skipped",
+        "reason": "already_listed_for_cycle",
+        "date": "2026-09-04T00:23:37.252Z",
+        "result": {
+          "ok": true,
+          "skipped": true,
+          "reason": "already_listed_for_cycle",
+          "productCode": "PR15301",
+          "poNumber": "PO4447"
+        }
+      },
+      {
+        "productCode": "PR15245",
+        "status": "skipped",
+        "reason": "no_active_presale_cycle",
+        "date": "2026-09-04T00:23:37.252Z"
+      }
+    ]
   }
 ]

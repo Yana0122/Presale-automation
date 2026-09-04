@@ -1833,7 +1833,7 @@ async function main() {
 
   // Keep graduated-this-week.json limited
   // to the last 7 days.
-  cleanGraduationHistory();
+  // cleanGraduationHistory();
 
   /* =======================================================
      STANDALONE PRODUCTS
@@ -1971,51 +1971,51 @@ function saveGraduationHistory(history) {
   );
 }
 
-function cleanGraduationHistory() {
-  const history =
-    loadGraduationHistory();
+// function cleanGraduationHistory() {
+//   const history =
+//     loadGraduationHistory();
 
-  const weekAgo =
-    Date.now() -
-    7 * 24 * 60 * 60 * 1000;
+//   const weekAgo =
+//     Date.now() -
+//     7 * 24 * 60 * 60 * 1000;
 
-  const cleaned =
-    history.filter(
-      (entry) => {
-        if (!entry.date) {
-          return false;
-        }
+//   const cleaned =
+//     history.filter(
+//       (entry) => {
+//         if (!entry.date) {
+//           return false;
+//         }
 
-        const timestamp =
-          new Date(
-            entry.date
-          ).getTime();
+//         const timestamp =
+//           new Date(
+//             entry.date
+//           ).getTime();
 
-        return (
-          !isNaN(timestamp) &&
-          timestamp >= weekAgo
-        );
-      }
-    );
+//         return (
+//           !isNaN(timestamp) &&
+//           timestamp >= weekAgo
+//         );
+//       }
+//     );
 
-  if (
-    cleaned.length !==
-    history.length
-  ) {
-    saveGraduationHistory(
-      cleaned
-    );
-  }
+//   if (
+//     cleaned.length !==
+//     history.length
+//   ) {
+//     saveGraduationHistory(
+//       cleaned
+//     );
+//   }
 
-  return cleaned;
-}
+//   return cleaned;
+// }
 
 function recordGraduation(
   product,
   state
 ) {
   const history =
-    cleanGraduationHistory();
+    loadGraduationHistory();
 
   const code =
     String(product.Code || "")

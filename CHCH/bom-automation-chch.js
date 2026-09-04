@@ -1,6 +1,10 @@
 require("dotenv").config();
+
 const fs = require("fs");
 const path = require("path");
+const OAuth = require("oauth-1.0a");
+const crypto = require("crypto");
+const JSONbig = require("json-bigint")({ storeAsString: true });
 
 const LOG_FILE = "./automation.log";
 
@@ -18,10 +22,6 @@ function log(type, msg) {
   console.log(`[${type.toUpperCase()}] ${msg}`);
   fs.appendFileSync(LOG_FILE, JSON.stringify(entry) + "\n");
 }
-
-const OAuth = require("oauth-1.0a");
-const crypto = require("crypto");
-const JSONbig = require("json-bigint")({ storeAsString: true });
 
 // --------------------------------------------------
 // TRADEVINE AUTH
@@ -54,15 +54,39 @@ const PRESALE_QTY = 5;
 // CHCH STATE FILE
 // --------------------------------------------------
 
-const STATE_FILE = path.join(__dirname, "..", "json", "CHCH", "processed-state-chch.json");
+const STATE_FILE = path.join(
+  __dirname,
+  "..",
+  "json",
+  "CHCH",
+  "processed-state-chch.json"
+);
+
+// --------------------------------------------------
+// SETTINGS
+// --------------------------------------------------
+
+const EXCLUDED_SUPPLIERS = ["Parmco Ltd"];
+
+// Keep this restricted while testing.
+// Remove/add PO numbers here when required.
+const ALLOWED_PO_NUMBERS = ["PO1589"];
 
 // --------------------------------------------------
 // STATE
 // --------------------------------------------------
 
 function loadState() {
-  if (!fs.existsSync(STATE_FILE)) return {};
-  return JSON.parse(fs.readFileSync(STATE_FILE, "utf8"));
+  if (!fs.existsSync(STATE_FILE)) {
+    return {};
+  }
+
+  try {
+    return JSON.parse(fs.readFileSync(STATE_FILE, "utf8"));
+  } catch (err) {
+    console.error(`Could not read ${STATE_FILE}:`, err.message);
+    return {};
+  }
 }
 
 function saveState(state) {
@@ -74,7 +98,7 @@ function saveState(state) {
 // --------------------------------------------------
 
 function withDsPrefix(title) {
-  return title.startsWith("DS ") ? title : `DS ${title}`;
+  return /^DS\s+/i.test(title) ? title : `DS ${title}`;
 }
 
 function isExcludedByTitle(name) {
@@ -90,21 +114,105 @@ function parentCodeFromChildCode(childCode) {
 }
 
 // --------------------------------------------------
+// SUPPLIER CHECK
+// --------------------------------------------------
+
+function isExcludedSupplier(supplierName) {
+  return EXCLUDED_SUPPLIERS.some(
+    (excluded) =>
+      excluded.toLowerCase() ===
+      String(supplierName || "").trim().toLowerCase()
+  );
+}
+
+// --------------------------------------------------
+// COMPLETED INVENTORY CYCLE HELPERS
+// --------------------------------------------------
+//
+// IMPORTANT:
+//
+// Inventory state is cycle-specific:
+//
+// inv:PO1589:PR15250
+// inv:PO1595:PR15250
+//
+// Both records must remain.
+//
+// The newest completed record is considered the
+// current presale cycle for that product.
+// --------------------------------------------------
+
+function getCompletedInventoryCycles(productCode, state) {
+  return Object.keys(state)
+    .filter(
+      (key) =>
+        key.startsWith("inv:") &&
+        key.endsWith(`:${productCode}`)
+    )
+    .map((key) => {
+      const parts = key.split(":");
+
+      const poNumber = parts[1];
+      const entry = state[key];
+
+      return {
+        key,
+        poNumber,
+        date:
+          entry?.date ||
+          entry?.processedDate ||
+          "",
+        supplier: entry?.supplier || "",
+        entry,
+      };
+    })
+    .filter((cycle) => cycle.entry?.done === true)
+    .sort((a, b) => {
+      const aTime = Date.parse(a.date || "");
+      const bTime = Date.parse(b.date || "");
+
+      return (
+        (Number.isNaN(bTime) ? 0 : bTime) -
+        (Number.isNaN(aTime) ? 0 : aTime)
+      );
+    });
+}
+
+function getCurrentCycleForProduct(productCode, state) {
+  const cycles = getCompletedInventoryCycles(
+    productCode,
+    state
+  );
+
+  return cycles[0] || null;
+}
+
+// --------------------------------------------------
+// CHECK WHETHER PRODUCT ALREADY HAS CURRENT CYCLE
+// --------------------------------------------------
+
+function hasInventoryForCycle(productCode, poNumber, state) {
+  const key = `inv:${poNumber}:${productCode}`;
+
+  return state[key]?.done === true;
+}
+
+// --------------------------------------------------
 // REQUIRED PRODUCT DATA CHECK
 // --------------------------------------------------
 
 function hasRequiredProductData(product) {
   const description = String(
     product.Description ??
-    product.DescriptionHtml ??
-    ""
+      product.DescriptionHtml ??
+      ""
   ).trim();
 
   const price = Number(
     product.Price ??
-    product.SellingPrice ??
-    product.RetailPrice ??
-    0
+      product.SellingPrice ??
+      product.RetailPrice ??
+      0
   );
 
   return {
@@ -113,6 +221,10 @@ function hasRequiredProductData(product) {
     hasPrice: price > 0,
   };
 }
+
+// --------------------------------------------------
+// BLOCK MISSING PRODUCT DATA
+// --------------------------------------------------
 
 function blockMissingProductData(
   product,
@@ -138,7 +250,13 @@ function blockMissingProductData(
 
   const reason = `Missing ${missing.join(" and ")}`;
 
-  state[`blocked:${product.Code}`] = {
+  /*
+   * Keep the block PO-specific so that a block from one
+   * PO does not incorrectly represent another cycle.
+   */
+  const blockKey = `blocked:${poNumber}:${product.Code}`;
+
+  state[blockKey] = {
     poNumber,
     supplier: supplierName,
     reason,
@@ -150,7 +268,7 @@ function blockMissingProductData(
 
   log(
     "warn",
-    `${product.Code} — BLOCKED: ${reason}`
+    `${product.Code} — BLOCKED for ${poNumber}: ${reason}`
   );
 
   console.log(
@@ -165,7 +283,15 @@ function blockMissingProductData(
 // --------------------------------------------------
 
 async function apiGet(url) {
-  const authHeader = oauth.toHeader(oauth.authorize({ url, method: "GET" }, token));
+  const authHeader = oauth.toHeader(
+    oauth.authorize(
+      {
+        url,
+        method: "GET",
+      },
+      token
+    )
+  );
 
   const res = await fetch(url, {
     method: "GET",
@@ -177,10 +303,19 @@ async function apiGet(url) {
 
   const text = await res.text();
 
-  return {
-    status: res.status,
-    data: JSONbig.parse(text),
-  };
+  try {
+    return {
+      status: res.status,
+      data: JSONbig.parse(text),
+      raw: text,
+    };
+  } catch {
+    return {
+      status: res.status,
+      data: null,
+      raw: text,
+    };
+  }
 }
 
 // --------------------------------------------------
@@ -188,7 +323,15 @@ async function apiGet(url) {
 // --------------------------------------------------
 
 async function apiPost(url, body) {
-  const authHeader = oauth.toHeader(oauth.authorize({ url, method: "POST" }, token));
+  const authHeader = oauth.toHeader(
+    oauth.authorize(
+      {
+        url,
+        method: "POST",
+      },
+      token
+    )
+  );
 
   const res = await fetch(url, {
     method: "POST",
@@ -197,7 +340,7 @@ async function apiPost(url, body) {
       "Content-Type": "application/json",
       Accept: "application/json",
     },
-    body: JSON.stringify(body),
+    body: JSONbig.stringify(body),
   });
 
   const text = await res.text();
@@ -222,9 +365,25 @@ async function apiPost(url, body) {
 // --------------------------------------------------
 
 async function getAllAwaitingReceiptPOs() {
-  const url = "https://api.tradevine.com/v1/PurchaseOrder?status=19001&pageSize=200";
-  const { data } = await apiGet(url);
-  return data.List || [];
+  const url =
+    "https://api.tradevine.com/v1/PurchaseOrder" +
+    "?status=19001&pageSize=200";
+
+  const result = await apiGet(url);
+
+  if (result.status !== 200 || !result.data) {
+    throw new Error(
+      `PurchaseOrder lookup failed — HTTP ${result.status}: ${
+        result.raw || ""
+      }`
+    );
+  }
+
+  return (
+    result.data.List ||
+    result.data.list ||
+    []
+  );
 }
 
 // --------------------------------------------------
@@ -232,19 +391,53 @@ async function getAllAwaitingReceiptPOs() {
 // --------------------------------------------------
 
 async function getProductByCode(code) {
-  const url = `https://api.tradevine.com/v1/Product?code=${encodeURIComponent(code)}&pageSize=10`;
-  const { data } = await apiGet(url);
+  const url =
+    `https://api.tradevine.com/v1/Product` +
+    `?code=${encodeURIComponent(code)}` +
+    `&pageSize=10`;
 
-  const list = data.List || data;
-  return list.find((p) => p.Code === code) || null;
+  const result = await apiGet(url);
+
+  if (
+    result.status !== 200 ||
+    !result.data
+  ) {
+    console.log(
+      `${code}: Product lookup failed — HTTP ${result.status}`
+    );
+
+    return null;
+  }
+
+  const list =
+    result.data.List ||
+    result.data.list ||
+    result.data;
+
+  if (!Array.isArray(list)) {
+    return null;
+  }
+
+  return (
+    list.find(
+      (product) =>
+        String(product.Code).toUpperCase() ===
+        String(code).toUpperCase()
+    ) || null
+  );
 }
 
 // --------------------------------------------------
 // ADD INVENTORY
 // --------------------------------------------------
 
-async function addInventory(productCode, quantity, warehouseCode) {
-  const url = "https://api.tradevine.com/v1/ProductInventory/MakeAdjustment";
+async function addInventory(
+  productCode,
+  quantity,
+  warehouseCode
+) {
+  const url =
+    "https://api.tradevine.com/v1/ProductInventory/MakeAdjustment";
 
   const body = {
     ProductCode: productCode,
@@ -252,35 +445,62 @@ async function addInventory(productCode, quantity, warehouseCode) {
     InventoryType: 36009,
     QuantityChange: quantity,
     ProductCostPrice: 0.0,
-    Notes: "Presale automation - initial stock",
+    Notes:
+      "Presale automation - initial stock",
   };
 
-  const { status, raw } = await apiPost(url, body);
+  const result = await apiPost(url, body);
 
   log(
-    status === 200 ? "success" : "error",
+    result.status === 200
+      ? "success"
+      : "error",
     `Inventory +${quantity} on ${productCode}: ${
-      status === 200 ? "OK" : "FAILED - " + raw.slice(0, 200)
+      result.status === 200
+        ? "OK"
+        : "FAILED - " +
+          (result.raw || "").slice(0, 200)
     }`
   );
 
-  return status === 200;
+  return result.status === 200;
 }
 
 // --------------------------------------------------
 // PREFIX DS TITLE
 // --------------------------------------------------
 
-async function prefixTitle(product, state, poNumber, supplierName) {
-  if (product.Name.startsWith("DS ")) {
-    console.log(`      Title already prefixed on ${product.Code}: "${product.Name}" — skipping`);
+async function prefixTitle(
+  product,
+  state,
+  poNumber,
+  supplierName
+) {
+  if (!product) {
+    return false;
+  }
+
+  const currentName = String(
+    product.Name || ""
+  );
+
+  if (/^DS\s+/i.test(currentName)) {
+    console.log(
+      `      Title already prefixed on ${product.Code}: "${currentName}" — skipping`
+    );
+
     return true;
   }
 
-  const newName = withDsPrefix(product.Name);
+  const newName = withDsPrefix(
+    currentName
+  );
 
   if (newName.length > 80) {
-    state[`blocked:${product.Code}`] = {
+    const blockKey =
+      `blocked:${poNumber}:${product.Code}`;
+
+    state[blockKey] = {
       poNumber,
       supplier: supplierName,
       reason: "Title exceeds 80 chars",
@@ -290,56 +510,624 @@ async function prefixTitle(product, state, poNumber, supplierName) {
 
     saveState(state);
 
-    log("warn", `${product.Code} — title exceeds 80 chars, blocked`);
+    log(
+      "warn",
+      `${product.Code} — title exceeds 80 chars, blocked for ${poNumber}`
+    );
+
     return false;
   }
 
-  const url = `https://api.tradevine.com/v1/Product/${product.ProductID}`;
+  const url =
+    `https://api.tradevine.com/v1/Product/${product.ProductID}`;
 
-  const { status, data, raw } = await apiPost(url, { ...product, Name: newName });
+  const result = await apiPost(
+    url,
+    {
+      ...product,
+      Name: newName,
+    }
+  );
 
   log(
-    status === 200 ? "success" : "error",
+    result.status === 200
+      ? "success"
+      : "error",
     `Title update on ${product.Code}: ${
-      status === 200 ? `OK — "${data.Name}"` : "FAILED - " + raw.slice(0, 200)
+      result.status === 200
+        ? `OK — "${result.data?.Name || newName}"`
+        : "FAILED - " +
+          (result.raw || "").slice(0, 200)
     }`
   );
 
-  return status === 200;
+  return result.status === 200;
 }
 
 // --------------------------------------------------
 // LINK BOM CHILDREN
 // --------------------------------------------------
+//
+// IMPORTANT:
+// Keep using parent.BoMComponents.
+// This is the working CHCH/WLG-compatible
+// Tradevine BOM structure.
+// --------------------------------------------------
 
-async function linkChildrenToParent(parent, childProductIds) {
-  const existing = (parent.BoMComponents || []).filter((c) => c.BoMComponentProductID);
-  const existingIds = new Set(existing.map((c) => String(c.BoMComponentProductID)));
+async function linkChildrenToParent(
+  parent,
+  childProductIds
+) {
+  const existing =
+    (parent.BoMComponents || []).filter(
+      (component) =>
+        component.BoMComponentProductID
+    );
 
-  const newOnes = childProductIds.filter((id) => !existingIds.has(String(id)));
+  const existingIds = new Set(
+    existing.map((component) =>
+      String(
+        component.BoMComponentProductID
+      )
+    )
+  );
+
+  const newOnes =
+    childProductIds.filter(
+      (id) =>
+        !existingIds.has(String(id))
+    );
 
   if (newOnes.length === 0) {
-    console.log(`      BOM link already complete for ${parent.Code}`);
+    console.log(
+      `      BOM link already complete for ${parent.Code}`
+    );
+
     return true;
   }
 
   const merged = [
-    ...existing.map((c) => ({
-      BoMComponentProductID: c.BoMComponentProductID,
-      BoMComponentQuantity: c.BoMComponentQuantity || 1,
+    ...existing.map((component) => ({
+      BoMComponentProductID:
+        component.BoMComponentProductID,
+
+      BoMComponentQuantity:
+        component.BoMComponentQuantity || 1,
     })),
+
     ...newOnes.map((id) => ({
       BoMComponentProductID: id,
       BoMComponentQuantity: 1,
     })),
   ];
 
-  const url = `https://api.tradevine.com/v1/Product/SaveBoMComponents/${parent.ProductID}`;
-  const { status, raw } = await apiPost(url, merged);
+  const url =
+    `https://api.tradevine.com/v1/Product/SaveBoMComponents/${parent.ProductID}`;
 
-  console.log(`      BOM link for ${parent.Code}: ${status === 200 ? "OK" : "FAILED - " + raw.slice(0, 200)}`);
+  const result = await apiPost(
+    url,
+    merged
+  );
 
-  return status === 200;
+  console.log(
+    `      BOM link for ${parent.Code}: ${
+      result.status === 200
+        ? "OK"
+        : "FAILED - " +
+          (result.raw || "").slice(0, 200)
+    }`
+  );
+
+  if (result.status !== 200) {
+    log(
+      "error",
+      `${parent.Code}: BOM link failed — ${
+        result.raw || ""
+      }`.slice(0, 500)
+    );
+
+    return false;
+  }
+
+  return true;
+}
+
+// --------------------------------------------------
+// PROCESS BOM PARENT
+// --------------------------------------------------
+
+async function processBomParent(
+  parentCode,
+  children,
+  po,
+  state
+) {
+  console.log("");
+  console.log(
+    `  Processing BOM parent: ${parentCode}`
+  );
+
+  const poNumber = po.OrderNumber;
+  const supplierName =
+    po.Supplier?.Name || "";
+
+  // ------------------------------------------------
+  // GET PARENT
+  // ------------------------------------------------
+
+  const parent =
+    await getProductByCode(parentCode);
+
+  if (!parent) {
+    console.log(
+      `    BLOCKED: could not find parent product for code ${parentCode}`
+    );
+
+    return;
+  }
+
+  if (
+    isExcludedByTitle(parent.Name)
+  ) {
+    console.log(
+      `    ${parentCode}: title contains "NZ MADE" — excluded, skipping`
+    );
+
+    return;
+  }
+
+  // ------------------------------------------------
+  // CURRENT CYCLE
+  // ------------------------------------------------
+  //
+  // Children are the source of BOM inventory-cycle
+  // identity.
+  //
+  // All children for a BOM must belong to the same
+  // PO cycle.
+  // ------------------------------------------------
+
+  const childCycles = [];
+
+  for (const child of children) {
+    const cycle =
+      getCurrentCycleForProduct(
+        child.Code,
+        state
+      );
+
+    if (cycle) {
+      childCycles.push({
+        childCode: child.Code,
+        cycle,
+      });
+    }
+  }
+
+  const cyclePoNumbers = [
+    ...new Set(
+      childCycles.map(
+        (item) =>
+          String(
+            item.cycle.poNumber
+          ).toUpperCase()
+      )
+    ),
+  ];
+
+  if (
+    cyclePoNumbers.length > 0 &&
+    cyclePoNumbers.length !== 1
+  ) {
+    console.log(
+      `    ${parentCode}: BOM children are on different PO cycles — skipping`
+    );
+
+    for (const item of childCycles) {
+      console.log(
+        `      ${item.childCode}: ${item.cycle.poNumber}`
+      );
+    }
+
+    log(
+      "warn",
+      `${parentCode}: BOM children are on different PO cycles`
+    );
+
+    return;
+  }
+
+  /*
+   * The PO being processed is the authoritative cycle
+   * for this run.
+   *
+   * If a previous cycle exists in state, that is history
+   * and does not prevent this PO from being processed.
+   */
+
+  console.log(
+    `    Current CHCH BOM cycle: ${poNumber}`
+  );
+
+  log(
+    "info",
+    `${parentCode}: current BOM cycle = ${poNumber}`
+  );
+
+  // ------------------------------------------------
+  // CHILD INVENTORY
+  // ------------------------------------------------
+
+  for (const child of children) {
+    console.log(
+      `    Child: ${child.Code}`
+    );
+
+    if (
+      blockMissingProductData(
+        child,
+        state,
+        poNumber,
+        supplierName
+      )
+    ) {
+      continue;
+    }
+
+    const invKey =
+      `inv:${poNumber}:${child.Code}`;
+
+    /*
+     * Cycle-specific inventory check.
+     *
+     * PO1589 and PO1595 are independent cycles.
+     */
+
+    if (
+      hasInventoryForCycle(
+        child.Code,
+        poNumber,
+        state
+      )
+    ) {
+      console.log(
+        `      ${child.Code}: inventory already added for ${poNumber} — skipping`
+      );
+
+      continue;
+    }
+
+    const warehouseCode =
+      await getOrAssignWarehouse(
+        child.Code,
+        state
+      );
+
+    const ok =
+      await addInventory(
+        child.Code,
+        PRESALE_QTY,
+        warehouseCode
+      );
+
+    if (ok) {
+      state[invKey] = {
+        done: true,
+        date:
+          new Date().toISOString(),
+        supplier:
+          supplierName || null,
+      };
+
+      saveState(state);
+
+      console.log(
+        `      ${child.Code}: inventory recorded for ${poNumber} ✓`
+      );
+    }
+  }
+
+  // ------------------------------------------------
+  // PARENT REQUIRED DATA
+  // ------------------------------------------------
+
+  if (
+    blockMissingProductData(
+      parent,
+      state,
+      poNumber,
+      supplierName
+    )
+  ) {
+    return;
+  }
+
+  // ------------------------------------------------
+  // BOM LINK
+  // ------------------------------------------------
+  //
+  // The BOM relationship itself is product-level.
+  // It does not need a separate BOM relationship for
+  // every PO cycle.
+  //
+  // However, the state record is updated with the PO
+  // that confirmed/processed this cycle.
+  // ------------------------------------------------
+
+  const bomKey =
+    `bom:${parentCode}`;
+
+  const existingBomState =
+    state[bomKey];
+
+  if (
+    existingBomState?.done === true &&
+    String(
+      existingBomState.poNumber || ""
+    ).toUpperCase() ===
+      String(poNumber).toUpperCase()
+  ) {
+    console.log(
+      `    BOM already recorded as done for ${parentCode} on ${poNumber}`
+    );
+  } else {
+    const freshParent =
+      await getProductByCode(
+        parentCode
+      );
+
+    if (!freshParent) {
+      console.log(
+        `    ${parentCode}: parent disappeared before BOM link — stopping`
+      );
+
+      return;
+    }
+
+    const ok =
+      await linkChildrenToParent(
+        freshParent,
+        children.map(
+          (child) =>
+            child.ProductID
+        )
+      );
+
+    if (!ok) {
+      console.log(
+        `    ${parentCode}: BOM linking failed — stopping`
+      );
+
+      return;
+    }
+
+    state[bomKey] = {
+      done: true,
+      date:
+        new Date().toISOString(),
+      supplier:
+        supplierName || null,
+      poNumber,
+    };
+
+    saveState(state);
+
+    console.log(
+      `    ${parentCode}: BOM state recorded for ${poNumber} ✓`
+    );
+  }
+
+  // ------------------------------------------------
+  // PARENT TITLE
+  // ------------------------------------------------
+
+  const titleKey =
+    `title:${parentCode}`;
+
+  const existingTitleState =
+    state[titleKey];
+
+  if (
+    existingTitleState?.done === true &&
+    String(
+      existingTitleState.poNumber || ""
+    ).toUpperCase() ===
+      String(poNumber).toUpperCase()
+  ) {
+    console.log(
+      `    Title already recorded as done for ${parentCode} on ${poNumber}`
+    );
+  } else {
+    const freshParent =
+      await getProductByCode(
+        parentCode
+      );
+
+    if (!freshParent) {
+      console.log(
+        `    ${parentCode}: parent not found before title update — stopping`
+      );
+
+      return;
+    }
+
+    const ok =
+      await prefixTitle(
+        freshParent,
+        state,
+        poNumber,
+        supplierName
+      );
+
+    if (!ok) {
+      console.log(
+        `    ${parentCode}: title update failed — state not recorded`
+      );
+
+      return;
+    }
+
+    state[titleKey] = {
+      done: true,
+      date:
+        new Date().toISOString(),
+      supplier:
+        supplierName || null,
+      poNumber,
+    };
+
+    saveState(state);
+
+    console.log(
+      `    ${parentCode}: title state recorded for ${poNumber} ✓`
+    );
+  }
+
+  console.log(
+    `  ${parentCode}: CHCH BOM cycle ${poNumber} processed ✓`
+  );
+
+  log(
+    "success",
+    `${parentCode}: CHCH BOM cycle ${poNumber} processed`
+  );
+}
+
+// --------------------------------------------------
+// PROCESS STANDALONE PRODUCT
+// --------------------------------------------------
+
+async function processStandaloneProduct(
+  product,
+  po,
+  state
+) {
+  const poNumber =
+    po.OrderNumber;
+
+  const supplierName =
+    po.Supplier?.Name || "";
+
+  console.log(
+    `  Standalone: ${product.Code}`
+  );
+
+  if (
+    blockMissingProductData(
+      product,
+      state,
+      poNumber,
+      supplierName
+    )
+  ) {
+    return;
+  }
+
+  const invKey =
+    `inv:${poNumber}:${product.Code}`;
+
+  // ------------------------------------------------
+  // INVENTORY
+  // ------------------------------------------------
+
+  if (
+    !hasInventoryForCycle(
+      product.Code,
+      poNumber,
+      state
+    )
+  ) {
+    const warehouseCode =
+      await getOrAssignWarehouse(
+        product.Code,
+        state
+      );
+
+    const ok =
+      await addInventory(
+        product.Code,
+        PRESALE_QTY,
+        warehouseCode
+      );
+
+    if (ok) {
+      state[invKey] = {
+        done: true,
+        date:
+          new Date().toISOString(),
+        supplier:
+          supplierName || null,
+      };
+
+      saveState(state);
+    }
+  } else {
+    console.log(
+      `    Inventory already added for ${poNumber} — skipping`
+    );
+  }
+
+  // ------------------------------------------------
+  // TITLE
+  // ------------------------------------------------
+
+  const titleKey =
+    `title:${product.Code}`;
+
+  const existingTitleState =
+    state[titleKey];
+
+  if (
+    existingTitleState?.done === true &&
+    String(
+      existingTitleState.poNumber || ""
+    ).toUpperCase() ===
+      String(poNumber).toUpperCase()
+  ) {
+    console.log(
+      `    Title already recorded as done for ${product.Code} on ${poNumber}`
+    );
+
+    return;
+  }
+
+  const freshProduct =
+    await getProductByCode(
+      product.Code
+    );
+
+  if (!freshProduct) {
+    console.log(
+      `    ${product.Code}: could not refresh product before title update`
+    );
+
+    return;
+  }
+
+  const ok =
+    await prefixTitle(
+      freshProduct,
+      state,
+      poNumber,
+      supplierName
+    );
+
+  if (ok) {
+    state[titleKey] = {
+      done: true,
+      date:
+        new Date().toISOString(),
+      supplier:
+        supplierName || null,
+      poNumber,
+    };
+
+    saveState(state);
+
+    console.log(
+      `    ${product.Code}: title state recorded for ${poNumber} ✓`
+    );
+  }
 }
 
 // --------------------------------------------------
@@ -347,60 +1135,164 @@ async function linkChildrenToParent(parent, childProductIds) {
 // --------------------------------------------------
 
 async function main() {
-  const state = loadState();
-  const allPos = await getAllAwaitingReceiptPOs();
+  console.log("");
+  console.log(
+    "=============================================="
+  );
+  console.log(
+    " CHCH BOM / PRESALE AUTOMATION"
+  );
+  console.log(
+    " INVENTORY + BOM + TITLE"
+  );
+  console.log(
+    " + CYCLE 1 / CYCLE 2 SUPPORT"
+  );
+  console.log(
+    "=============================================="
+  );
+  console.log("");
 
-  const ALLOWED_PO_NUMBERS = ["PO1589"];
+  const state =
+    loadState();
 
-  const pos = allPos.filter((po) => ALLOWED_PO_NUMBERS.includes(po.OrderNumber));
+  const allPos =
+    await getAllAwaitingReceiptPOs();
 
-  console.log(`Found ${allPos.length} total Awaiting Receipt PO(s) on this account.`);
-  console.log(`Restricted to: ${ALLOWED_PO_NUMBERS.join(", ")}`);
+  const pos =
+    allPos.filter(
+      (po) =>
+        ALLOWED_PO_NUMBERS.includes(
+          po.OrderNumber
+        )
+    );
+
+  console.log(
+    `Found ${allPos.length} total Awaiting Receipt PO(s) on this account.`
+  );
+
+  console.log(
+    `Restricted to: ${ALLOWED_PO_NUMBERS.join(
+      ", "
+    )}`
+  );
+
   console.log(
     `Will process: ${
-      pos.map((p) => p.OrderNumber).join(", ") || "(none matched — check PO number/status)"
+      pos
+        .map(
+          (p) =>
+            p.OrderNumber
+        )
+        .join(", ") ||
+      "(none matched — check PO number/status)"
     }\n`
   );
 
-  const EXCLUDED_SUPPLIERS = ["Parmco Ltd"];
+  // ------------------------------------------------
+  // PROCESS POS
+  // ------------------------------------------------
 
   for (const po of pos) {
-    const supplierName = po.Supplier?.Name || "";
+    const supplierName =
+      po.Supplier?.Name || "";
 
-    if (EXCLUDED_SUPPLIERS.some((s) => s.toLowerCase() === supplierName.toLowerCase())) {
-      console.log(`=== ${po.OrderNumber} — SKIPPED (excluded supplier: "${supplierName}") ===\n`);
+    if (
+      isExcludedSupplier(
+        supplierName
+      )
+    ) {
+      console.log(
+        `=== ${po.OrderNumber} — SKIPPED (excluded supplier: "${supplierName}") ===\n`
+      );
+
       continue;
     }
 
-    console.log(`=== ${po.OrderNumber} (Supplier: ${supplierName}) ===`);
+    console.log(
+      `=== ${po.OrderNumber} (Supplier: ${supplierName}) ===`
+    );
 
-    const childrenByParent = {};
+    const childrenByParent =
+      {};
+
     const standalone = [];
 
     // ------------------------------------------------
     // READ PO PRODUCTS
     // ------------------------------------------------
 
-    for (const line of po.PurchaseOrderLines) {
-      const { data: product } = await apiGet(
-        `https://api.tradevine.com/v1/Product/${line.productId || line.ProductID}`
-      );
+    for (const line of po.PurchaseOrderLines || []) {
+      const productId =
+        line.productId ||
+        line.ProductID;
 
-      if (isExcludedByTitle(product.Name)) {
-        console.log(`  ${product.Code}: title contains "NZ MADE" — excluded, skipping`);
+      if (!productId) {
+        console.log(
+          "  PO line has no product ID — skipping"
+        );
+
         continue;
       }
 
-      if (isChildCode(product.Code)) {
-        const parentCode = parentCodeFromChildCode(product.Code);
+      const result =
+        await apiGet(
+          `https://api.tradevine.com/v1/Product/${productId}`
+        );
 
-        if (!childrenByParent[parentCode]) {
-          childrenByParent[parentCode] = [];
+      if (
+        result.status !== 200 ||
+        !result.data
+      ) {
+        console.log(
+          `  Product lookup failed for PO line product ${productId}`
+        );
+
+        continue;
+      }
+
+      const product =
+        result.data;
+
+      if (
+        isExcludedByTitle(
+          product.Name
+        )
+      ) {
+        console.log(
+          `  ${product.Code}: title contains "NZ MADE" — excluded, skipping`
+        );
+
+        continue;
+      }
+
+      if (
+        isChildCode(
+          product.Code
+        )
+      ) {
+        const parentCode =
+          parentCodeFromChildCode(
+            product.Code
+          );
+
+        if (
+          !childrenByParent[
+            parentCode
+          ]
+        ) {
+          childrenByParent[
+            parentCode
+          ] = [];
         }
 
-        childrenByParent[parentCode].push(product);
+        childrenByParent[
+          parentCode
+        ].push(product);
       } else {
-        standalone.push(product);
+        standalone.push(
+          product
+        );
       }
     }
 
@@ -408,116 +1300,51 @@ async function main() {
     // BOM PARENT GROUPS
     // ------------------------------------------------
 
-    for (const parentCode of Object.keys(childrenByParent)) {
-      console.log(`  Parent group: ${parentCode}`);
+    for (const parentCode of Object.keys(
+      childrenByParent
+    )) {
+      try {
+        console.log(
+          `  Parent group: ${parentCode}`
+        );
 
-      const children = childrenByParent[parentCode];
+        const children =
+          childrenByParent[
+            parentCode
+          ];
 
-      // ----------------------------------------------
-      // CHILD INVENTORY
-      // ----------------------------------------------
+        /*
+         * IMPORTANT:
+         * Do not process a BOM parent if there are
+         * no actual children.
+         */
 
-      for (const child of children) {
         if (
-          blockMissingProductData(
-            child,
-            state,
-            po.OrderNumber,
-            po.Supplier?.Name || null
-          )
+          !children ||
+          children.length === 0
         ) {
+          console.log(
+            `    ${parentCode}: no child products found — skipping`
+          );
+
           continue;
         }
 
-        const invKey = `inv:${po.OrderNumber}:${child.Code}`;
-
-        if (state[invKey]) {
-          console.log(`    ${child.Code}: inventory already added for this PO — skipping`);
-          continue;
-        }
-
-        const warehouseCode = await getOrAssignWarehouse(child.Code, state);
-        const ok = await addInventory(child.Code, PRESALE_QTY, warehouseCode);
-
-        if (ok) {
-          state[invKey] = {
-            done: true,
-            date: new Date().toISOString(),
-            supplier: po.Supplier?.Name || null,
-          };
-        }
-      }
-
-      // ----------------------------------------------
-      // GET PARENT
-      // ----------------------------------------------
-
-      const parent = await getProductByCode(parentCode);
-
-      if (!parent) {
-        console.log(`    BLOCKED: could not find parent product for code ${parentCode}`);
-        continue;
-      }
-
-      if (
-        blockMissingProductData(
-          parent,
-          state,
-          po.OrderNumber,
-          po.Supplier?.Name || null
-        )
-      ) {
-        continue;
-      }
-
-      // ----------------------------------------------
-      // BOM LINK
-      // ----------------------------------------------
-
-      const bomKey = `bom:${parentCode}`;
-
-      if (!state[bomKey]) {
-        const ok = await linkChildrenToParent(
-          parent,
-          children.map((c) => c.ProductID)
+        await processBomParent(
+          parentCode,
+          children,
+          po,
+          state
+        );
+      } catch (err) {
+        console.error(
+          `${parentCode}: ERROR — ${err.message}`
         );
 
-        if (ok) {
-          state[bomKey] = {
-            done: true,
-            date: new Date().toISOString(),
-            supplier: po.Supplier?.Name || null,
-          };
-        }
-      } else {
-        console.log(`    BOM link already recorded as done for ${parentCode}`);
-      }
-
-      // ----------------------------------------------
-      // PARENT TITLE
-      // ----------------------------------------------
-
-      const titleKey = `title:${parentCode}`;
-
-      if (!state[titleKey]) {
-        const freshParent = await getProductByCode(parentCode);
-
-        const ok = await prefixTitle(
-          freshParent,
-          state,
-          po.OrderNumber,
-          po.Supplier?.Name || null
+        log(
+          "error",
+          `${parentCode}: ${err.message}`
         );
-
-        if (ok) {
-          state[titleKey] = {
-            done: true,
-            date: new Date().toISOString(),
-            supplier: po.Supplier?.Name || null,
-          };
-        }
-      } else {
-        console.log(`    Title already recorded as done for ${parentCode}`);
       }
     }
 
@@ -526,68 +1353,51 @@ async function main() {
     // ------------------------------------------------
 
     for (const product of standalone) {
-      console.log(`  Standalone: ${product.Code}`);
-
-      if (
-        blockMissingProductData(
+      try {
+        await processStandaloneProduct(
           product,
-          state,
-          po.OrderNumber,
-          po.Supplier?.Name || null
-        )
-      ) {
-        continue;
-      }
-
-      const invKey = `inv:${po.OrderNumber}:${product.Code}`;
-
-      if (!state[invKey]) {
-        const warehouseCode = await getOrAssignWarehouse(product.Code, state);
-        const ok = await addInventory(product.Code, PRESALE_QTY, warehouseCode);
-
-        if (ok) {
-          state[invKey] = {
-            done: true,
-            date: new Date().toISOString(),
-            supplier: po.Supplier?.Name || null,
-          };
-        }
-      } else {
-        console.log(`    Inventory already added for this PO — skipping`);
-      }
-
-      const titleKey = `title:${product.Code}`;
-
-      if (!state[titleKey]) {
-        const ok = await prefixTitle(
-          product,
-          state,
-          po.OrderNumber,
-          po.Supplier?.Name || null
+          po,
+          state
+        );
+      } catch (err) {
+        console.error(
+          `${product.Code}: ERROR — ${err.message}`
         );
 
-        if (ok) {
-          state[titleKey] = {
-            done: true,
-            date: new Date().toISOString(),
-            supplier: po.Supplier?.Name || null,
-          };
-        }
-      } else {
-        console.log(`    Title already recorded as done — skipping`);
+        log(
+          "error",
+          `${product.Code}: ${err.message}`
+        );
       }
     }
 
     console.log("");
   }
 
+  // ------------------------------------------------
+  // SAVE STATE
+  // ------------------------------------------------
+
   saveState(state);
 
-  console.log("Done. State saved to", STATE_FILE);
+  console.log(
+    "Done. State saved to",
+    STATE_FILE
+  );
 }
 
 // --------------------------------------------------
 // RUN
 // --------------------------------------------------
 
-main().catch((err) => console.error("SCRIPT CRASHED:", err));
+main().catch((err) => {
+  console.error(
+    "SCRIPT CRASHED:",
+    err.message
+  );
+
+  console.error(err);
+
+  process.exit(1);
+});
+

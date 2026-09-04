@@ -50,15 +50,9 @@
   },
   "inv:PO4447:PR15245": {
     "done": true,
-    "date": "2026-09-01T02:55:34.955Z",
-    "supplier": "Test Supplier for Shopify"
-  },
-  "blocked:PR15245": {
-    "poNumber": "PO4447",
+    "date": "2026-09-03T22:55:21.334Z",
     "supplier": "Test Supplier for Shopify",
-    "reason": "Title exceeds 80 chars",
-    "detectedAt": "2026-09-02T02:48:31.527Z",
-    "productCode": "PR15245"
+    "note": "manually actioned by staff via dashboard"
   },
   "inv:PO4447:PR15301": {
     "done": true,
@@ -93,5 +87,55 @@
     "date": "2026-09-02T03:49:25.681Z",
     "note": "Product successfully listed on Shopify",
     "shopifyProductId": "3904465234889219277"
+  },
+  "shopify-listed:PO4447:PR15242": {
+    "done": true,
+    "date": "2026-09-03T04:17:59.762Z",
+    "productCode": "PR15242",
+    "poNumber": "PO4447",
+    "note": "Product successfully listed on Shopify for this presale cycle",
+    "shopifyProductId": "3922781652407524834"
+  },
+  "title:PR13374": {
+    "done": true,
+    "poNumber": "PO4447",
+    "date": "2026-09-03T22:48:46.357Z",
+    "supplier": "Test Supplier for Shopify"
+  },
+  "title:PR15301": {
+    "done": true,
+    "poNumber": "PO4447",
+    "date": "2026-09-03T22:48:46.501Z",
+    "supplier": "Test Supplier for Shopify"
+  },
+  "title:PR15245": {
+    "done": true,
+    "date": "2026-09-03T22:55:21.334Z",
+    "supplier": "Test Supplier for Shopify",
+    "note": "manually actioned by staff via dashboard"
+  },
+  "shopify-listed:PO4447:PR15301": {
+    "done": true,
+    "date": "2026-09-03T23:21:51.722Z",
+    "productCode": "PR15301",
+    "poNumber": "PO4447",
+    "note": "Product successfully listed on Shopify for this presale cycle",
+    "shopifyProductId": "3923730468901786847"
+  },
+  "shopify-listed:PO4447:PR13374": {
+    "done": true,
+    "date": "2026-09-03T23:22:00.580Z",
+    "productCode": "PR13374",
+    "poNumber": "PO4447",
+    "note": "Product successfully listed on Shopify for this presale cycle",
+    "shopifyProductId": "3904465234889219277"
+  },
+  "shopify-listed:PO4447:PR15241": {
+    "done": true,
+    "date": "2026-09-04T00:13:23.304Z",
+    "productCode": "PR15241",
+    "poNumber": "PO4447",
+    "note": "Product successfully listed on Shopify for this presale cycle",
+    "shopifyProductId": "3922695212106541448"
   }
 }

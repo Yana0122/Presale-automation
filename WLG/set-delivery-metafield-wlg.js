@@ -50,11 +50,8 @@ const token = {
 // SHOPIFY
 // ==================================================
 
-const SHOPIFY_STORE =
-  process.env.SHOPIFY_STORE;
-
-const SHOPIFY_TOKEN =
-  process.env.SHOPIFY_ACCESS_TOKEN;
+const SHOPIFY_STORE = process.env.SHOPIFY_STORE;
+const SHOPIFY_TOKEN = process.env.SHOPIFY_ACCESS_TOKEN;
 
 const API_VERSION = "2026-07";
 
@@ -104,20 +101,13 @@ async function tvApiGet(url) {
 // SHOPIFY GRAPHQL
 // ==================================================
 
-async function shopifyGraphQL(
-  query,
-  variables = {}
-) {
+async function shopifyGraphQL(query, variables = {}) {
   if (!SHOPIFY_STORE) {
-    throw new Error(
-      "SHOPIFY_STORE is missing from .env"
-    );
+    throw new Error("SHOPIFY_STORE is missing from .env");
   }
 
   if (!SHOPIFY_TOKEN) {
-    throw new Error(
-      "SHOPIFY_ACCESS_TOKEN is missing from .env"
-    );
+    throw new Error("SHOPIFY_ACCESS_TOKEN is missing from .env");
   }
 
   const url =
@@ -129,8 +119,7 @@ async function shopifyGraphQL(
 
     headers: {
       "Content-Type": "application/json",
-      "X-Shopify-Access-Token":
-        SHOPIFY_TOKEN,
+      "X-Shopify-Access-Token": SHOPIFY_TOKEN,
     },
 
     body: JSON.stringify({
@@ -166,11 +155,7 @@ async function shopifyGraphQL(
   if (data.errors) {
     console.log(
       "GraphQL errors:",
-      JSON.stringify(
-        data.errors,
-        null,
-        2
-      )
+      JSON.stringify(data.errors, null, 2)
     );
   }
 
@@ -185,18 +170,12 @@ function addDays(dateStr, days) {
   const d = new Date(dateStr);
 
   if (Number.isNaN(d.getTime())) {
-    throw new Error(
-      `Invalid date: ${dateStr}`
-    );
+    throw new Error(`Invalid date: ${dateStr}`);
   }
 
-  d.setDate(
-    d.getDate() + days
-  );
+  d.setDate(d.getDate() + days);
 
-  return d
-    .toISOString()
-    .slice(0, 10);
+  return d.toISOString().slice(0, 10);
 }
 
 // ==================================================
@@ -219,24 +198,9 @@ function isChildProduct(productCode) {
 // ==================================================
 // LOAD PROCESSED STATE
 // ==================================================
-//
-// ../json/WLG/../json/WLG/../json/WLG/processed-state-wlg.json is an OBJECT:
-//
-// {
-//   "inv:PO1560:PR13374": {
-//     "done": true
-//   }
-// }
-//
-// We do NOT modify this file.
-// ==================================================
 
 function loadProcessedState() {
-  if (
-    !fs.existsSync(
-      PROCESSED_STATE_FILE
-    )
-  ) {
+  if (!fs.existsSync(PROCESSED_STATE_FILE)) {
     console.log(
       `ERROR: ${PROCESSED_STATE_FILE} not found.`
     );
@@ -245,13 +209,12 @@ function loadProcessedState() {
   }
 
   try {
-    const data =
-      JSON.parse(
-        fs.readFileSync(
-          PROCESSED_STATE_FILE,
-          "utf8"
-        )
-      );
+    const data = JSON.parse(
+      fs.readFileSync(
+        PROCESSED_STATE_FILE,
+        "utf8"
+      )
+    );
 
     if (
       !data ||
@@ -259,7 +222,7 @@ function loadProcessedState() {
       typeof data !== "object"
     ) {
       console.log(
-        "ERROR: ../json/WLG/processed-state-wlg.json must contain an object."
+        "ERROR: processed-state-wlg.json must contain an object."
       );
 
       return {};
@@ -268,7 +231,7 @@ function loadProcessedState() {
     return data;
   } catch (err) {
     console.error(
-      "Could not read ../json/WLG/processed-state-wlg.json:",
+      "Could not read processed-state-wlg.json:",
       err.message
     );
 
@@ -277,48 +240,30 @@ function loadProcessedState() {
 }
 
 // ==================================================
-// GET PROCESSED PRODUCTS
+// GET COMPLETED INVENTORY CYCLES
 // ==================================================
 //
-// ONLY:
-//
-//   inv:PO:PR
-//
-// AND:
-//
-//   done === true
-//
-// are eligible.
+// We intentionally keep ALL completed inventory records.
 //
 // Example:
 //
-// "inv:PO1560:PR13374": {
-//   "done": true
-// }
+// inv:PO1560:PR13374
+// inv:PO1620:PR13374
 //
-// becomes:
+// These represent two separate cycles.
 //
-// productCode = PR13374
-// poNumber    = PO1560
+// We do NOT use productCode as the unique key here.
 // ==================================================
 
-function getProcessedProducts(
-  state
-) {
-  const products = new Map();
+function getCompletedInventoryCycles(state) {
+  const cycles = [];
 
-  for (
-    const [key, value]
-    of Object.entries(state)
-  ) {
+  for (const [key, value] of Object.entries(state)) {
     // ------------------------------------------------
     // Must be completed
     // ------------------------------------------------
 
-    if (
-      !value ||
-      value.done !== true
-    ) {
+    if (!value || value.done !== true) {
       continue;
     }
 
@@ -326,18 +271,13 @@ function getProcessedProducts(
     // Only inventory records
     // ------------------------------------------------
 
-    if (
-      !key.startsWith("inv:")
-    ) {
+    if (!key.startsWith("inv:")) {
       continue;
     }
 
-    const parts =
-      key.split(":");
+    const parts = key.split(":");
 
-    if (
-      parts.length < 3
-    ) {
+    if (parts.length < 3) {
       console.log(
         `Ignoring invalid state key: ${key}`
       );
@@ -349,23 +289,21 @@ function getProcessedProducts(
     // Extract PO
     // ------------------------------------------------
 
-    const poNumber =
-      parts[1]
-        .trim()
-        .toUpperCase();
+    const poNumber = parts[1]
+      .trim()
+      .toUpperCase();
 
     // ------------------------------------------------
-    // Extract Product Code
+    // Extract product code
     // ------------------------------------------------
 
-    const productCode =
-      parts
-        .slice(2)
-        .join(":")
-        .trim()
-        .toUpperCase();
+    const productCode = parts
+      .slice(2)
+      .join(":")
+      .trim()
+      .toUpperCase();
 
-    if (!productCode) {
+    if (!poNumber || !productCode) {
       continue;
     }
 
@@ -373,11 +311,7 @@ function getProcessedProducts(
     // Ignore BOM children
     // ------------------------------------------------
 
-    if (
-      isChildProduct(
-        productCode
-      )
-    ) {
+    if (isChildProduct(productCode)) {
       console.log(
         `Ignoring BOM child: ${productCode}`
       );
@@ -386,24 +320,17 @@ function getProcessedProducts(
     }
 
     // ------------------------------------------------
-    // Store product
+    // Store complete cycle
     // ------------------------------------------------
 
-    products.set(
+    cycles.push({
       productCode,
-      {
-        productCode,
-        poNumber,
-        processedDate:
-          value.date ||
-          null,
-      }
-    );
+      poNumber,
+      processedDate: value.date || null,
+    });
   }
 
-  return Array.from(
-    products.values()
-  );
+  return cycles;
 }
 
 // ==================================================
@@ -419,8 +346,7 @@ async function getAwaitingReceiptPOs() {
     "https://api.tradevine.com/v1/PurchaseOrder" +
     "?status=19001&pageSize=200";
 
-  const result =
-    await tvApiGet(url);
+  const result = await tvApiGet(url);
 
   if (
     result.status !== 200 ||
@@ -458,52 +384,135 @@ function getPONumber(po) {
 }
 
 // ==================================================
-// FIND PO DIRECTLY FROM PROCESSED STATE
+// BUILD ACTIVE PRODUCT CYCLES
 // ==================================================
 //
-// ../json/WLG/../json/WLG/../json/WLG/processed-state-wlg.json already tells us:
+// This is the important Cycle 1 / Cycle 2 logic.
 //
+// For every completed inventory record:
+//
+// 1. Check whether its PO is currently Awaiting Receipt.
+// 2. Group by product.
+// 3. If the same product exists on multiple active POs,
+//    use the newest completed inventory record.
+//
+// Example:
+//
+// Cycle 1:
 // inv:PO1560:PR13374
 //
-// Therefore we use PO1560 directly.
+// Cycle 2:
+// inv:PO1620:PR13374
+//
+// If PO1620 is currently Awaiting Receipt,
+// PO1620 wins.
+//
 // ==================================================
 
-function findPOByNumber(
-  poNumber,
+function getActiveProductCycles(
+  completedCycles,
   awaitingPOs
 ) {
-  const wanted =
-    String(
-      poNumber || ""
-    )
+  // ------------------------------------------------
+  // Build quick lookup of active Awaiting Receipt POs
+  // ------------------------------------------------
+
+  const activePOs = new Map();
+
+  for (const po of awaitingPOs) {
+    const poNumber = getPONumber(po);
+
+    if (!poNumber) {
+      continue;
+    }
+
+    const normalized = String(poNumber)
       .trim()
       .toUpperCase();
 
-  return (
-    awaitingPOs.find(
-      (po) => {
-        const current =
-          getPONumber(po);
+    activePOs.set(normalized, po);
+  }
 
-        return (
-          current &&
-          String(current)
-            .trim()
-            .toUpperCase() ===
-            wanted
-        );
-      }
-    ) || null
+  // ------------------------------------------------
+  // Keep only completed cycles whose PO is active
+  // ------------------------------------------------
+
+  const activeCycles = completedCycles.filter(
+    (cycle) => {
+      return activePOs.has(cycle.poNumber);
+    }
   );
+
+  // ------------------------------------------------
+  // Group by product
+  // ------------------------------------------------
+
+  const byProduct = new Map();
+
+  for (const cycle of activeCycles) {
+    if (!byProduct.has(cycle.productCode)) {
+      byProduct.set(cycle.productCode, []);
+    }
+
+    byProduct
+      .get(cycle.productCode)
+      .push(cycle);
+  }
+
+  // ------------------------------------------------
+  // Select newest active cycle per product
+  // ------------------------------------------------
+
+  const selected = [];
+
+  for (const [
+    productCode,
+    cycles,
+  ] of byProduct.entries()) {
+    cycles.sort((a, b) => {
+      const dateA = a.processedDate
+        ? new Date(a.processedDate).getTime()
+        : 0;
+
+      const dateB = b.processedDate
+        ? new Date(b.processedDate).getTime()
+        : 0;
+
+      return dateB - dateA;
+    });
+
+    const currentCycle = cycles[0];
+
+    selected.push(currentCycle);
+
+    if (cycles.length > 1) {
+      console.log("");
+      console.log(
+        `Cycle history detected for ${productCode}:`
+      );
+
+      cycles.forEach((cycle, index) => {
+        console.log(
+          `  ${index + 1}. ${cycle.poNumber} → ${
+            cycle.processedDate || "no date"
+          }`
+        );
+      });
+
+      console.log(
+        `  → CURRENT ACTIVE CYCLE: ${currentCycle.poNumber}`
+      );
+    }
+  }
+
+  return selected;
 }
 
 // ==================================================
 // FIND SHOPIFY PRODUCT BY SKU
 // ==================================================
 
-async function findShopifyProductBySku(
-  sku
-) {
+async function findShopifyProductBySku(sku) {
   const query = `
     query findBySku($query: String!) {
       productVariants(first: 1, query: $query) {
@@ -520,13 +529,12 @@ async function findShopifyProductBySku(
     }
   `;
 
-  const data =
-    await shopifyGraphQL(
-      query,
-      {
-        query: `sku:${sku}`,
-      }
-    );
+  const data = await shopifyGraphQL(
+    query,
+    {
+      query: `sku:${sku}`,
+    }
+  );
 
   const edge =
     data.data
@@ -568,30 +576,24 @@ async function setDeliveryDateMetafield(
     }
   `;
 
-  const result =
-    await shopifyGraphQL(
-      mutation,
-      {
-        metafields: [
-          {
-            ownerId:
-              shopifyProductGid,
+  const result = await shopifyGraphQL(
+    mutation,
+    {
+      metafields: [
+        {
+          ownerId: shopifyProductGid,
 
-            namespace:
-              "stock",
+          namespace: "stock",
 
-            key:
-              "wlg_arriving_date",
+          key: "wlg_arriving_date",
 
-            type:
-              "date",
+          type: "date",
 
-            value:
-              dateValue,
-          },
-        ],
-      }
-    );
+          value: dateValue,
+        },
+      ],
+    }
+  );
 
   return result;
 }
@@ -622,11 +624,7 @@ async function processProduct(
   );
 
   console.log(
-    `Processed state: done = true`
-  );
-
-  console.log(
-    `PO from ../json/WLG/processed-state-wlg.json: ${statePONumber}`
+    `Current active PO cycle: ${statePONumber}`
   );
 
   // ------------------------------------------------
@@ -634,9 +632,7 @@ async function processProduct(
   // ------------------------------------------------
 
   if (
-    isChildProduct(
-      productCode
-    )
+    isChildProduct(productCode)
   ) {
     console.log(
       `${productCode}: SKIPPED — BOM child product`
@@ -650,14 +646,26 @@ async function processProduct(
   }
 
   // ------------------------------------------------
-  // FIND EXACT PO
+  // FIND EXACT ACTIVE PO
   // ------------------------------------------------
 
   const po =
-    findPOByNumber(
-      statePONumber,
-      awaitingPOs
-    );
+    awaitingPOs.find(
+      (candidate) => {
+        const current =
+          getPONumber(candidate);
+
+        return (
+          current &&
+          String(current)
+            .trim()
+            .toUpperCase() ===
+            String(statePONumber)
+              .trim()
+              .toUpperCase()
+        );
+      }
+    ) || null;
 
   if (!po) {
     console.log(
@@ -668,8 +676,7 @@ async function processProduct(
       productCode,
       status: "blocked",
       reason: "po_not_found",
-      poNumber:
-        statePONumber,
+      poNumber: statePONumber,
       missing: [
         "purchase order",
       ],
@@ -740,8 +747,7 @@ async function processProduct(
         "invalid_required_delivery_date",
       poNumber,
       requiredDeliveryDate,
-      error:
-        err.message,
+      error: err.message,
     };
   }
 
@@ -824,8 +830,7 @@ async function processProduct(
       poNumber,
       requiredDeliveryDate,
       arrivingDate,
-      errors:
-        userErrors,
+      errors: userErrors,
     };
   }
 
@@ -837,13 +842,26 @@ async function processProduct(
     productCode,
     status: "updated",
     reason: null,
-    poNumber,
+
+    // ------------------------------------------------
+    // CYCLE INFORMATION
+    // ------------------------------------------------
+
+    cyclePO: poNumber,
+
+    processedDate:
+      product.processedDate,
+
     requiredDeliveryDate,
+
     arrivingDate,
+
     shopifyProductId:
       shopifyProduct.id,
+
     shopifyProductTitle:
       shopifyProduct.title,
+
     metafield:
       "stock.wlg_arriving_date",
   };
@@ -876,7 +894,7 @@ function loadPreviousResults() {
       : [];
   } catch (err) {
     console.error(
-      "Could not read ../json/WLG/delivery-metafield-results-wlg.json:",
+      "Could not read delivery-metafield-results-wlg.json:",
       err.message
     );
 
@@ -888,9 +906,7 @@ function loadPreviousResults() {
 // SAVE RESULTS
 // ==================================================
 
-function saveResults(
-  results
-) {
+function saveResults(results) {
   fs.writeFileSync(
     METAFIELD_RESULTS_FILE,
     JSON.stringify(
@@ -914,7 +930,7 @@ async function main() {
     " WLG DELIVERY METAFIELD"
   );
   console.log(
-    " PROCESSED STATE"
+    " CYCLE 1 / CYCLE 2"
   );
   console.log(
     "========================================"
@@ -970,40 +986,24 @@ async function main() {
   const processedState =
     loadProcessedState();
 
-  const products =
-    getProcessedProducts(
+  const completedCycles =
+    getCompletedInventoryCycles(
       processedState
     );
 
   console.log(
-    `Found ${products.length} product(s) with done = true in ../json/WLG/processed-state-wlg.json.`
+    `Found ${completedCycles.length} completed inventory cycle record(s).`
   );
 
   if (
-    products.length === 0
+    completedCycles.length === 0
   ) {
     console.log(
-      "No eligible processed products found."
+      "No completed inventory records found."
     );
 
     return;
   }
-
-  console.log("");
-
-  console.log(
-    "Eligible products:"
-  );
-
-  products.forEach(
-    (product) => {
-      console.log(
-        `  ✓ ${product.productCode} → ${product.poNumber}`
-      );
-    }
-  );
-
-  console.log("");
 
   // ------------------------------------------------
   // 2. GET AWAITING RECEIPT POS
@@ -1029,7 +1029,47 @@ async function main() {
   console.log("");
 
   // ------------------------------------------------
-  // 3. PROCESS PRODUCTS
+  // 3. SELECT CURRENT ACTIVE CYCLE
+  // ------------------------------------------------
+
+  const products =
+    getActiveProductCycles(
+      completedCycles,
+      awaitingPOs
+    );
+
+  console.log("");
+  console.log(
+    `Found ${products.length} product(s) in an active Awaiting Receipt cycle.`
+  );
+
+  if (
+    products.length === 0
+  ) {
+    console.log(
+      "No eligible active product cycles found."
+    );
+
+    return;
+  }
+
+  console.log("");
+  console.log(
+    "Current active product cycles:"
+  );
+
+  products.forEach(
+    (product) => {
+      console.log(
+        `  ✓ ${product.productCode} → ${product.poNumber}`
+      );
+    }
+  );
+
+  console.log("");
+
+  // ------------------------------------------------
+  // 4. PROCESS PRODUCTS
   // ------------------------------------------------
 
   const now =
@@ -1089,11 +1129,18 @@ async function main() {
       runResults.push({
         runId,
         date: now,
+
         productCode:
           product.productCode,
+
+        poNumber:
+          product.poNumber,
+
         status: "blocked",
+
         reason:
           "script_error",
+
         error:
           err.message,
       });
@@ -1103,7 +1150,7 @@ async function main() {
   }
 
   // ------------------------------------------------
-  // 4. SAVE HISTORY
+  // 5. SAVE HISTORY
   // ------------------------------------------------
 
   const previousResults =
@@ -1136,7 +1183,7 @@ async function main() {
   );
 
   // ------------------------------------------------
-  // 5. SUMMARY
+  // 6. SUMMARY
   // ------------------------------------------------
 
   console.log("");

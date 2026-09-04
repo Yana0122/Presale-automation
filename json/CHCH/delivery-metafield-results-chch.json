@@ -55,5 +55,53 @@
         "metafield": "stock.chch_arriving_date"
       }
     ]
+  },
+  {
+    "runId": "2026-09-03T03-25-28-883Z",
+    "date": "2026-09-03T03:25:28.883Z",
+    "summary": {
+      "total": 3,
+      "updated": 2,
+      "blocked": 1,
+      "skipped": 0
+    },
+    "products": [
+      {
+        "runId": "2026-09-03T03-25-28-883Z",
+        "date": "2026-09-03T03:25:28.883Z",
+        "productCode": "PR15241",
+        "status": "blocked",
+        "reason": "shopify_product_not_found",
+        "poNumber": "PO1589",
+        "requiredDeliveryDate": "2026-09-22T12:00:00Z",
+        "arrivingDate": "2026-10-03"
+      },
+      {
+        "runId": "2026-09-03T03-25-28-883Z",
+        "date": "2026-09-03T03:25:28.883Z",
+        "productCode": "PR13374",
+        "status": "updated",
+        "reason": null,
+        "poNumber": "PO1589",
+        "requiredDeliveryDate": "2026-09-22T12:00:00Z",
+        "arrivingDate": "2026-10-03",
+        "shopifyProductId": "gid://shopify/Product/8400756867146",
+        "shopifyProductTitle": "DS Harsha Test",
+        "metafield": "stock.chch_arriving_date"
+      },
+      {
+        "runId": "2026-09-03T03-25-28-883Z",
+        "date": "2026-09-03T03:25:28.883Z",
+        "productCode": "PR15242",
+        "status": "updated",
+        "reason": null,
+        "poNumber": "PO1589",
+        "requiredDeliveryDate": "2026-09-22T12:00:00Z",
+        "arrivingDate": "2026-10-03",
+        "shopifyProductId": "gid://shopify/Product/8400754081866",
+        "shopifyProductTitle": "DS Test Website _A",
+        "metafield": "stock.chch_arriving_date"
+      }
+    ]
   }
 ]

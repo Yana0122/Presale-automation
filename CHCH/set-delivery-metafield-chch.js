@@ -50,13 +50,13 @@ const token = {
 // SHOPIFY
 // ==================================================
 
-const SHOPIFY_STORE =
-  process.env.SHOPIFY_STORE;
-
-const SHOPIFY_TOKEN =
-  process.env.SHOPIFY_ACCESS_TOKEN;
+const SHOPIFY_STORE = process.env.SHOPIFY_STORE;
+const SHOPIFY_TOKEN = process.env.SHOPIFY_ACCESS_TOKEN;
 
 const API_VERSION = "2026-07";
+
+const METAFIELD_NAMESPACE = "stock";
+const METAFIELD_KEY = "chch_arriving_date";
 
 // ==================================================
 // TRADEVINE GET
@@ -104,10 +104,7 @@ async function tvApiGet(url) {
 // SHOPIFY GRAPHQL
 // ==================================================
 
-async function shopifyGraphQL(
-  query,
-  variables = {}
-) {
+async function shopifyGraphQL(query, variables = {}) {
   if (!SHOPIFY_STORE) {
     throw new Error(
       "SHOPIFY_STORE is missing from .env"
@@ -129,8 +126,7 @@ async function shopifyGraphQL(
 
     headers: {
       "Content-Type": "application/json",
-      "X-Shopify-Access-Token":
-        SHOPIFY_TOKEN,
+      "X-Shopify-Access-Token": SHOPIFY_TOKEN,
     },
 
     body: JSON.stringify({
@@ -203,11 +199,12 @@ function addDays(dateStr, days) {
 // CHILD PRODUCT CHECK
 // ==================================================
 //
+// Example:
 // PR15242-A
 // PR15242-B
 //
-// These are BOM children and must NOT receive
-// their own delivery metafield.
+// BOM children must NOT receive their own
+// delivery metafield.
 // ==================================================
 
 function isChildProduct(productCode) {
@@ -217,18 +214,23 @@ function isChildProduct(productCode) {
 }
 
 // ==================================================
-// LOAD PROCESSED STATE
+// PARENT CODE FROM CHILD
 // ==================================================
-//
-// ../json/WLG/../json/WLG/../json/WLG/processed-state-wlg.json is an OBJECT:
-//
-// {
-//   "inv:PO1560:PR13374": {
-//     "done": true
-//   }
-// }
-//
-// We do NOT modify this file.
+
+function getParentCodeFromChild(childCode) {
+  const match =
+    String(childCode || "")
+      .trim()
+      .toUpperCase()
+      .match(/^(.+)-[A-Z]$/);
+
+  return match
+    ? match[1]
+    : null;
+}
+
+// ==================================================
+// LOAD PROCESSED STATE
 // ==================================================
 
 function loadProcessedState() {
@@ -259,7 +261,7 @@ function loadProcessedState() {
       typeof data !== "object"
     ) {
       console.log(
-        "ERROR: ../json/WLG/processed-state-wlg.json must contain an object."
+        "ERROR: CHCH processed state must contain an object."
       );
 
       return {};
@@ -268,7 +270,7 @@ function loadProcessedState() {
     return data;
   } catch (err) {
     console.error(
-      "Could not read ../json/WLG/processed-state-wlg.json:",
+      "Could not read CHCH processed state:",
       err.message
     );
 
@@ -277,54 +279,41 @@ function loadProcessedState() {
 }
 
 // ==================================================
-// GET PROCESSED PRODUCTS
+// GET COMPLETED INVENTORY CYCLES
 // ==================================================
 //
-// ONLY:
+// Reads:
 //
-//   inv:PO:PR
+// inv:PO1589:PR13374
+// inv:PO1590:PR13374
 //
-// AND:
+// Only done === true records count.
 //
-//   done === true
+// Historical cycles are preserved.
 //
-// are eligible.
-//
-// Example:
-//
-// "inv:PO1560:PR13374": {
-//   "done": true
-// }
-//
-// becomes:
-//
-// productCode = PR13374
-// poNumber    = PO1560
+// The newest cycle is selected by the recorded date.
 // ==================================================
 
-function getProcessedProducts(
+function getCompletedInventoryCycles(
+  productCode,
   state
 ) {
-  const products = new Map();
+  const cycles = [];
+
+  const wantedCode =
+    String(productCode || "")
+      .trim()
+      .toUpperCase();
 
   for (
-    const [key, value]
-    of Object.entries(state)
+    const [key, value] of Object.entries(state)
   ) {
-    // ------------------------------------------------
-    // Must be completed
-    // ------------------------------------------------
-
     if (
       !value ||
       value.done !== true
     ) {
       continue;
     }
-
-    // ------------------------------------------------
-    // Only inventory records
-    // ------------------------------------------------
 
     if (
       !key.startsWith("inv:")
@@ -338,25 +327,342 @@ function getProcessedProducts(
     if (
       parts.length < 3
     ) {
-      console.log(
-        `Ignoring invalid state key: ${key}`
-      );
-
       continue;
     }
-
-    // ------------------------------------------------
-    // Extract PO
-    // ------------------------------------------------
 
     const poNumber =
       parts[1]
         .trim()
         .toUpperCase();
 
-    // ------------------------------------------------
-    // Extract Product Code
-    // ------------------------------------------------
+    const code =
+      parts
+        .slice(2)
+        .join(":")
+        .trim()
+        .toUpperCase();
+
+    if (
+      code !== wantedCode
+    ) {
+      continue;
+    }
+
+    cycles.push({
+      productCode: wantedCode,
+      poNumber,
+      processedDate:
+        value.date ||
+        value.processedDate ||
+        null,
+    });
+  }
+
+  return cycles;
+}
+
+// ==================================================
+// GET CURRENT CYCLE FOR STANDALONE PRODUCT
+// ==================================================
+
+function getCurrentCycleForProduct(
+  productCode,
+  state
+) {
+  const cycles =
+    getCompletedInventoryCycles(
+      productCode,
+      state
+    );
+
+  if (
+    cycles.length === 0
+  ) {
+    return null;
+  }
+
+  cycles.sort(
+    (a, b) => {
+      const dateA =
+        a.processedDate
+          ? new Date(
+              a.processedDate
+            ).getTime()
+          : 0;
+
+      const dateB =
+        b.processedDate
+          ? new Date(
+              b.processedDate
+            ).getTime()
+          : 0;
+
+      return dateB - dateA;
+    }
+  );
+
+  return cycles[0];
+}
+
+// ==================================================
+// GET CURRENT BOM CYCLE
+// ==================================================
+//
+// A BOM parent does not receive inventory.
+//
+// Its cycle is determined from its children.
+//
+// Example:
+//
+// PR15242-A → PO1589
+// PR15242-B → PO1589
+//
+// Therefore:
+//
+// PR15242 → PO1589
+//
+// All current children must belong to the
+// same PO.
+//
+// If children are on different current POs,
+// the BOM is blocked rather than guessing.
+// ==================================================
+
+function getCurrentBomCycle(
+  parentCode,
+  state
+) {
+  const prefix =
+    `${String(parentCode || "")
+      .trim()
+      .toUpperCase()}-`;
+
+  const childCycles = [];
+
+  for (
+    const [key, value] of Object.entries(state)
+  ) {
+    if (
+      !value ||
+      value.done !== true
+    ) {
+      continue;
+    }
+
+    if (
+      !key.startsWith("inv:")
+    ) {
+      continue;
+    }
+
+    const parts =
+      key.split(":");
+
+    if (
+      parts.length < 3
+    ) {
+      continue;
+    }
+
+    const poNumber =
+      parts[1]
+        .trim()
+        .toUpperCase();
+
+    const productCode =
+      parts
+        .slice(2)
+        .join(":")
+        .trim()
+        .toUpperCase();
+
+    if (
+      !productCode.startsWith(
+        prefix
+      )
+    ) {
+      continue;
+    }
+
+    if (
+      !isChildProduct(
+        productCode
+      )
+    ) {
+      continue;
+    }
+
+    const cycles =
+      getCompletedInventoryCycles(
+        productCode,
+        state
+      );
+
+    if (
+      cycles.length === 0
+    ) {
+      continue;
+    }
+
+    const currentCycle =
+      getCurrentCycleForProduct(
+        productCode,
+        state
+      );
+
+    if (!currentCycle) {
+      continue;
+    }
+
+    childCycles.push({
+      childCode: productCode,
+      poNumber:
+        currentCycle.poNumber,
+      processedDate:
+        currentCycle.processedDate,
+    });
+  }
+
+  if (
+    childCycles.length === 0
+  ) {
+    return null;
+  }
+
+  // ------------------------------------------------
+  // Remove duplicate child entries
+  // ------------------------------------------------
+
+  const uniqueChildren =
+    new Map();
+
+  for (
+    const child of childCycles
+  ) {
+    uniqueChildren.set(
+      child.childCode,
+      child
+    );
+  }
+
+  const children =
+    Array.from(
+      uniqueChildren.values()
+    );
+
+  // ------------------------------------------------
+  // All children must be on the same PO
+  // ------------------------------------------------
+
+  const poNumbers =
+    [
+      ...new Set(
+        children.map(
+          (child) =>
+            child.poNumber
+        )
+      ),
+    ];
+
+  if (
+    poNumbers.length !== 1
+  ) {
+    console.log(
+      `${parentCode}: BLOCKED — BOM children have different current POs`
+    );
+
+    children.forEach(
+      (child) => {
+        console.log(
+          `  ${child.childCode} → ${child.poNumber}`
+        );
+      }
+    );
+
+    return {
+      blocked: true,
+      reason:
+        "bom_children_different_pos",
+      children,
+    };
+  }
+
+  const poNumber =
+    poNumbers[0];
+
+  const latestDate =
+    children
+      .map(
+        (child) =>
+          child.processedDate
+      )
+      .filter(Boolean)
+      .sort()
+      .pop() || null;
+
+  return {
+    productCode:
+      String(parentCode)
+        .trim()
+        .toUpperCase(),
+
+    poNumber,
+
+    processedDate:
+      latestDate,
+
+    children,
+  };
+}
+
+// ==================================================
+// GET CURRENT CHCH PRODUCTS
+// ==================================================
+//
+// Standalone:
+//   inv:PO:PR
+//
+// BOM parent:
+//   bom:PR
+//   with current cycle derived from children
+//
+// Children are never returned directly.
+// ==================================================
+
+function getCurrentProducts(
+  state
+) {
+  const products =
+    new Map();
+
+  // ------------------------------------------------
+  // 1. Standalone products
+  // ------------------------------------------------
+
+  for (
+    const [key, value] of Object.entries(state)
+  ) {
+    if (
+      !value ||
+      value.done !== true
+    ) {
+      continue;
+    }
+
+    if (
+      !key.startsWith("inv:")
+    ) {
+      continue;
+    }
+
+    const parts =
+      key.split(":");
+
+    if (
+      parts.length < 3
+    ) {
+      continue;
+    }
 
     const productCode =
       parts
@@ -369,34 +675,115 @@ function getProcessedProducts(
       continue;
     }
 
-    // ------------------------------------------------
-    // Ignore BOM children
-    // ------------------------------------------------
-
     if (
       isChildProduct(
         productCode
       )
     ) {
-      console.log(
-        `Ignoring BOM child: ${productCode}`
-      );
-
       continue;
     }
 
-    // ------------------------------------------------
-    // Store product
-    // ------------------------------------------------
+    const currentCycle =
+      getCurrentCycleForProduct(
+        productCode,
+        state
+      );
+
+    if (!currentCycle) {
+      continue;
+    }
 
     products.set(
       productCode,
       {
         productCode,
-        poNumber,
+        poNumber:
+          currentCycle.poNumber,
         processedDate:
-          value.date ||
-          null,
+          currentCycle.processedDate,
+        type: "standalone",
+      }
+    );
+  }
+
+  // ------------------------------------------------
+  // 2. BOM parents
+  // ------------------------------------------------
+  //
+  // bom:PR15242
+  //
+  // The BOM state itself is not used to decide
+  // the PO. The children determine the current PO.
+  // ------------------------------------------------
+
+  for (
+    const [key, value] of Object.entries(state)
+  ) {
+    if (
+      !value ||
+      value.done !== true
+    ) {
+      continue;
+    }
+
+    if (
+      !key.startsWith("bom:")
+    ) {
+      continue;
+    }
+
+    const parentCode =
+      key
+        .slice(4)
+        .trim()
+        .toUpperCase();
+
+    if (!parentCode) {
+      continue;
+    }
+
+    const bomCycle =
+      getCurrentBomCycle(
+        parentCode,
+        state
+      );
+
+    if (
+      !bomCycle
+    ) {
+      continue;
+    }
+
+    if (
+      bomCycle.blocked
+    ) {
+      products.set(
+        parentCode,
+        {
+          productCode:
+            parentCode,
+          poNumber: null,
+          processedDate: null,
+          type: "bom",
+          blocked: true,
+          reason:
+            bomCycle.reason,
+        }
+      );
+
+      continue;
+    }
+
+    products.set(
+      parentCode,
+      {
+        productCode:
+          parentCode,
+        poNumber:
+          bomCycle.poNumber,
+        processedDate:
+          bomCycle.processedDate,
+        type: "bom",
       }
     );
   }
@@ -458,14 +845,7 @@ function getPONumber(po) {
 }
 
 // ==================================================
-// FIND PO DIRECTLY FROM PROCESSED STATE
-// ==================================================
-//
-// ../json/WLG/../json/WLG/../json/WLG/processed-state-wlg.json already tells us:
-//
-// inv:PO1560:PR13374
-//
-// Therefore we use PO1560 directly.
+// FIND EXACT PO
 // ==================================================
 
 function findPOByNumber(
@@ -539,7 +919,7 @@ async function findShopifyProductBySku(
 }
 
 // ==================================================
-// SET WLG DELIVERY METAFIELD
+// SET CHCH DELIVERY METAFIELD
 // ==================================================
 
 async function setDeliveryDateMetafield(
@@ -578,10 +958,10 @@ async function setDeliveryDateMetafield(
               shopifyProductGid,
 
             namespace:
-              "stock",
+              METAFIELD_NAMESPACE,
 
             key:
-              "chch_arriving_date",
+              METAFIELD_KEY,
 
             type:
               "date",
@@ -622,15 +1002,38 @@ async function processProduct(
   );
 
   console.log(
-    `Processed state: done = true`
+    `Current CHCH cycle: ${
+      statePONumber || "UNKNOWN"
+    }`
   );
 
   console.log(
-    `PO from ../json/WLG/processed-state-wlg.json: ${statePONumber}`
+    `Product type: ${
+      product.type
+    }`
   );
 
   // ------------------------------------------------
-  // SAFETY
+  // BOM STATE ERROR
+  // ------------------------------------------------
+
+  if (
+    product.blocked
+  ) {
+    console.log(
+      `${productCode}: BLOCKED — ${product.reason}`
+    );
+
+    return {
+      productCode,
+      status: "blocked",
+      reason:
+        product.reason,
+    };
+  }
+
+  // ------------------------------------------------
+  // SAFETY — CHILD
   // ------------------------------------------------
 
   if (
@@ -645,12 +1048,30 @@ async function processProduct(
     return {
       productCode,
       status: "skipped",
-      reason: "bom_child",
+      reason:
+        "bom_child",
     };
   }
 
   // ------------------------------------------------
-  // FIND EXACT PO
+  // CURRENT PO MUST EXIST
+  // ------------------------------------------------
+
+  if (!statePONumber) {
+    console.log(
+      `${productCode}: BLOCKED — no current CHCH PO cycle`
+    );
+
+    return {
+      productCode,
+      status: "blocked",
+      reason:
+        "no_current_po",
+    };
+  }
+
+  // ------------------------------------------------
+  // FIND EXACT CURRENT PO
   // ------------------------------------------------
 
   const po =
@@ -667,7 +1088,8 @@ async function processProduct(
     return {
       productCode,
       status: "blocked",
-      reason: "po_not_found",
+      reason:
+        "po_not_found",
       poNumber:
         statePONumber,
       missing: [
@@ -760,7 +1182,7 @@ async function processProduct(
 
   if (!shopifyProduct) {
     console.log(
-      `${productCode}: BLOCKED — product not found in CHCH Shopify`
+      `${productCode}: BLOCKED — product not found in AKL Shopify`
     );
 
     return {
@@ -830,7 +1252,7 @@ async function processProduct(
   }
 
   console.log(
-    `${productCode}: ✓ chch_arriving_date saved`
+    `${productCode}: ✓ ${METAFIELD_KEY} saved`
   );
 
   return {
@@ -845,7 +1267,7 @@ async function processProduct(
     shopifyProductTitle:
       shopifyProduct.title,
     metafield:
-      "stock.chch_arriving_date",
+      `${METAFIELD_NAMESPACE}.${METAFIELD_KEY}`,
   };
 }
 
@@ -876,7 +1298,7 @@ function loadPreviousResults() {
       : [];
   } catch (err) {
     console.error(
-      "Could not read ../json/WLG/delivery-metafield-results-wlg.json:",
+      "Could not read CHCH delivery metafield results:",
       err.message
     );
 
@@ -908,21 +1330,21 @@ function saveResults(
 async function main() {
   console.log("");
   console.log(
-    "========================================"
+    "=============================================="
   );
   console.log(
-    " CHCH DELIVERY METAFIELD"
+    " CHCH DELIVERY METAFIELD AUTOMATION"
   );
   console.log(
-    " PROCESSED STATE"
+    " + CYCLE 1 / CYCLE 2 SUPPORT"
   );
   console.log(
-    "========================================"
+    "=============================================="
   );
   console.log("");
 
   // ------------------------------------------------
-  // CHECK CREDENTIALS
+  // CHECK TRADEVINE CREDENTIALS
   // ------------------------------------------------
 
   if (
@@ -940,17 +1362,21 @@ async function main() {
     "✓ CHCH Tradevine credentials loaded"
   );
 
+  // ------------------------------------------------
+  // CHECK SHOPIFY CREDENTIALS
+  // ------------------------------------------------
+
   if (
     !SHOPIFY_STORE ||
     !SHOPIFY_TOKEN
   ) {
     throw new Error(
-      "WLG Shopify credentials are missing from .env"
+      "Shopify credentials are missing from .env"
     );
   }
 
   console.log(
-    "✓ WLG Shopify credentials loaded"
+    "✓ AKL Shopify credentials loaded"
   );
 
   console.log(
@@ -958,7 +1384,7 @@ async function main() {
   );
 
   console.log(
-    "Metafield: stock.wlg_arriving_date"
+    `Metafield: ${METAFIELD_NAMESPACE}.${METAFIELD_KEY}`
   );
 
   console.log("");
@@ -971,19 +1397,19 @@ async function main() {
     loadProcessedState();
 
   const products =
-    getProcessedProducts(
+    getCurrentProducts(
       processedState
     );
 
   console.log(
-    `Found ${products.length} product(s) with done = true in ../json/WLG/processed-state-wlg.json.`
+    `Found ${products.length} current CHCH product cycle(s).`
   );
 
   if (
     products.length === 0
   ) {
     console.log(
-      "No eligible processed products found."
+      "No eligible current CHCH product cycles found."
     );
 
     return;
@@ -992,13 +1418,16 @@ async function main() {
   console.log("");
 
   console.log(
-    "Eligible products:"
+    "Current CHCH cycles:"
   );
 
   products.forEach(
     (product) => {
       console.log(
-        `  ✓ ${product.productCode} → ${product.poNumber}`
+        `  - ${product.productCode} → ${
+          product.poNumber ||
+          "BLOCKED"
+        } (${product.type})`
       );
     }
   );
@@ -1091,6 +1520,9 @@ async function main() {
         date: now,
         productCode:
           product.productCode,
+        poNumber:
+          product.poNumber ||
+          null,
         status: "blocked",
         reason:
           "script_error",
@@ -1141,13 +1573,13 @@ async function main() {
 
   console.log("");
   console.log(
-    "========================================"
+    "=============================================="
   );
   console.log(
-    " WLG DELIVERY METAFIELD RUN COMPLETE"
+    " CHCH DELIVERY METAFIELD RUN COMPLETE"
   );
   console.log(
-    "========================================"
+    "=============================================="
   );
 
   console.log(
@@ -1173,7 +1605,7 @@ async function main() {
   );
 
   console.log(
-    "========================================"
+    "=============================================="
   );
 }
 
@@ -1185,13 +1617,13 @@ main().catch(
   (err) => {
     console.error("");
     console.error(
-      "========================================"
+      "=============================================="
     );
     console.error(
-      " WLG DELIVERY METAFIELD FAILED"
+      " CHCH DELIVERY METAFIELD FAILED"
     );
     console.error(
-      "========================================"
+      "=============================================="
     );
 
     console.error(
@@ -1203,3 +1635,4 @@ main().catch(
     process.exit(1);
   }
 );
+
