@@ -58,6 +58,50 @@ const STATE_FILE = path.join(
 
 const EXCLUDED_SUPPLIERS = ["Parmco Ltd"];
 
+// --------------------------------------------------
+// PO CREATION CUTOFF
+// --------------------------------------------------
+
+const AUTOMATION_PO_CUTOFF_DATE = "2026-09-07";
+
+// PO must have a valid CreatedDate and must be
+// created on or after the cutoff date.
+function isPOEligible(po) {
+  const createdDate = po.CreatedDate;
+
+  if (!createdDate) {
+    console.log(
+      `⚠️ ${po.OrderNumber}: PO creation date missing — SKIPPING for safety`
+    );
+
+    return false;
+  }
+
+  const poDate = new Date(createdDate);
+
+  const cutoffDate = new Date(
+    `${AUTOMATION_PO_CUTOFF_DATE}T00:00:00`
+  );
+
+  if (Number.isNaN(poDate.getTime())) {
+    console.log(
+      `⚠️ ${po.OrderNumber}: Invalid PO creation date "${createdDate}" — SKIPPING`
+    );
+
+    return false;
+  }
+
+  if (poDate < cutoffDate) {
+    console.log(
+      `⏭️ ${po.OrderNumber}: SKIPPED — created ${createdDate}, before cutoff ${AUTOMATION_PO_CUTOFF_DATE}`
+    );
+
+    return false;
+  }
+
+  return true;
+}
+
 // Safety restriction while testing
 const ALLOWED_PO_NUMBERS = ["PO1560"];
 
@@ -532,44 +576,59 @@ async function linkChildrenToParent(
 // --------------------------------------------------
 
 async function main() {
-  const state = loadState();
+ const state = loadState();
 
-  const allPos =
-    await getAllAwaitingReceiptPOs();
+ const allPos =
+  await getAllAwaitingReceiptPOs();
 
-  // --------------------------------------------------
-  // SAFETY RESTRICTION
-  // --------------------------------------------------
+console.log(
+  `Found ${allPos.length} total Awaiting Receipt PO(s) on this account.`
+);
 
-  const pos =
-    allPos.filter(
-      (po) =>
-        ALLOWED_PO_NUMBERS.includes(
-          po.OrderNumber
-        )
-    );
+// --------------------------------------------------
+// PO CREATION CUTOFF
+// --------------------------------------------------
 
-  console.log(
-    `Found ${allPos.length} total Awaiting Receipt PO(s) on this account.`
+const eligiblePos =
+  allPos.filter(isPOEligible);
+
+console.log(
+  `PO cutoff: ${AUTOMATION_PO_CUTOFF_DATE}`
+);
+
+console.log(
+  `Eligible POs after cutoff: ${eligiblePos.length}`
+);
+
+// --------------------------------------------------
+// SAFETY RESTRICTION
+// Keep single-PO restriction for now.
+// --------------------------------------------------
+
+const pos =
+  eligiblePos.filter(
+    (po) =>
+      ALLOWED_PO_NUMBERS.includes(
+        po.OrderNumber
+      )
   );
 
-  console.log(
-    `Restricted to: ${ALLOWED_PO_NUMBERS.join(
-      ", "
-    )}`
-  );
+console.log(
+  `Restricted to: ${ALLOWED_PO_NUMBERS.join(
+    ", "
+  )}`
+);
 
-  console.log(
-    `Will process: ${
-      pos
-        .map(
-          (p) => p.OrderNumber
-        )
-        .join(", ") ||
-      "(none matched — check PO number/status)"
-    }\n`
-  );
-
+console.log(
+  `Will process: ${
+    pos
+      .map(
+        (p) => p.OrderNumber
+      )
+      .join(", ") ||
+    "(none matched — PO may be before cutoff)"
+  }\n`
+);
   // --------------------------------------------------
   // PROCESS POS
   // --------------------------------------------------

@@ -219,6 +219,42 @@ function saveGraduated(data) {
     JSON.stringify(data, null, 2)
   );
 }
+// ---------- PO creation cutoff ----------
+const AUTOMATION_PO_CUTOFF_DATE = "2026-09-07";
+
+function isPOEligible(po) {
+  const createdDate = po.CreatedDate;
+
+  if (!createdDate) {
+    console.log(
+      `⚠️ ${po.OrderNumber}: PO creation date missing — SKIPPING for safety`
+    );
+    return false;
+  }
+
+  const poDate = new Date(createdDate);
+  const cutoffDate = new Date(
+    `${AUTOMATION_PO_CUTOFF_DATE}T00:00:00`
+  );
+
+  if (Number.isNaN(poDate.getTime())) {
+    console.log(
+      `⚠️ ${po.OrderNumber}: Invalid PO creation date "${createdDate}" — SKIPPING`
+    );
+    return false;
+  }
+
+  if (poDate < cutoffDate) {
+    console.log(
+      `⏭️ ${po.OrderNumber}: SKIPPED — created ${createdDate}, before cutoff ${AUTOMATION_PO_CUTOFF_DATE}`
+    );
+    return false;
+  }
+
+  return true;
+
+
+}
 
 function recordGraduation(productCode, extra = {}) {
   const graduated = loadGraduated();
@@ -250,9 +286,24 @@ async function main() {
   const state = loadState();
   const allPos = await getAllAwaitingReceiptPOs();
 
+  console.log(
+  `Found ${allPos.length} total Awaiting Receipt PO(s) on this account.`
+);
+
+// ---------- PO CREATION CUTOFF ----------
+const eligiblePos = allPos.filter(isPOEligible);
+
+console.log(
+  `PO cutoff: ${AUTOMATION_PO_CUTOFF_DATE}`
+);
+
+console.log(
+  `Eligible POs after cutoff: ${eligiblePos.length}`
+);
+
   // ---- SAFETY RESTRICTION: live account first test — only this PO ----
   const ALLOWED_PO_NUMBERS = ["PO4447"];
-  const pos = allPos.filter((po) => ALLOWED_PO_NUMBERS.includes(po.OrderNumber));
+  const pos = eligiblePos.filter((po) => ALLOWED_PO_NUMBERS.includes(po.OrderNumber));
 
   console.log(`Found ${allPos.length} total Awaiting Receipt PO(s) on this account.`);
   console.log(`Restricted to: ${ALLOWED_PO_NUMBERS.join(", ")}`);

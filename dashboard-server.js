@@ -2,6 +2,7 @@ require("dotenv").config();
 
 const express = require("express");
 const cors = require("cors");
+const session = require("express-session");
 const fs = require("fs");
 const path = require("path");
 const { spawn, spawnSync } = require("child_process");
@@ -15,32 +16,37 @@ const app = express();
 const PORT = Number(process.env.PORT) || 3456;
 
 // ==================================================
-// BASE PATHS
+// DASHBOARD AUTHENTICATION
 // ==================================================
-//
-// dashboard.js is located in the PROJECT ROOT.
-//
-// Example:
-//
-// D:\tsb-presale-live\
-// ├── dashboard.js
-// ├── dashboard/
-// │   └── index.html
-// ├── AKL/
-// │   ├── auto-remove-presale.js
-// │   ├── bom-automation.js
-// │   ├── remove-blocked.js
-// │   ├── set-delivery-metafiled.js
-// │   ├── shopify-old-listing.js
-// │   ├── test-shopify-old-listing.js
-// │   └── warehouse-assignment.js
-// ├── WLG/
-// ├── CHCH/
-// └── json/
-//     ├── AKL/
-//     ├── WLG/
-//     └── CHCH/
-//
+
+const DASHBOARD_USERNAME =
+  process.env.DASHBOARD_USERNAME;
+
+const DASHBOARD_PASSWORD =
+  process.env.DASHBOARD_PASSWORD;
+
+const SESSION_SECRET =
+  process.env.SESSION_SECRET;
+
+if (
+  !DASHBOARD_USERNAME ||
+  !DASHBOARD_PASSWORD ||
+  !SESSION_SECRET
+) {
+  console.error(
+    "ERROR: Dashboard authentication environment variables are missing."
+  );
+
+  console.error("Required:");
+  console.error("DASHBOARD_USERNAME");
+  console.error("DASHBOARD_PASSWORD");
+  console.error("SESSION_SECRET");
+
+  process.exit(1);
+}
+
+// ==================================================
+// BASE PATHS
 // ==================================================
 
 const ROOT_DIR = path.resolve(__dirname);
@@ -55,11 +61,27 @@ const DASHBOARD_DIR = path.join(
   "dashboard"
 );
 
+// --------------------------------------------------
+// MAIN DASHBOARD LOGS
+// --------------------------------------------------
+//
+// These files contain SHORT structured operational
+// events only.
+//
+// Raw automation stdout/stderr is stored separately
+// under debug-logs/.
+//
+// --------------------------------------------------
+
 const AUTOMATION_LOG = path.join(
   ROOT_DIR,
   "automation.log"
 );
 
+const DEBUG_LOG_DIR = path.join(
+  ROOT_DIR,
+  "debug-logs"
+);
 
 // ==================================================
 // FILE HELPERS
@@ -78,7 +100,6 @@ function firstExistingPath(
   return fallback;
 }
 
-
 function ensureParentDirectory(
   filePath
 ) {
@@ -92,7 +113,6 @@ function ensureParentDirectory(
   }
 }
 
-
 function fileExists(
   filePath
 ) {
@@ -103,24 +123,8 @@ function fileExists(
   }
 }
 
-
 // ==================================================
 // STORE CONFIGURATION
-// ==================================================
-//
-// AKL
-// ----
-// Shopify enabled.
-// All AKL automation scripts live inside /AKL.
-//
-// WLG
-// ----
-// No Shopify.
-//
-// CHCH
-// ----
-// No Shopify.
-//
 // ==================================================
 
 const STORES = {
@@ -136,7 +140,6 @@ const STORES = {
     name: "Auckland",
 
     shortName: "AKL",
-
 
     // ----------------------------------------------
     // STATE
@@ -166,8 +169,8 @@ const STORES = {
       "shopify-resolved.json"
     ),
 
-    logFile: AUTOMATION_LOG,
-
+    logFile:
+      AUTOMATION_LOG,
 
     // ----------------------------------------------
     // SHOPIFY
@@ -183,7 +186,6 @@ const STORES = {
 
     shopifyMetafieldKey:
       "akl_arriving_date",
-
 
     // ----------------------------------------------
     // TRADEVINE
@@ -201,7 +203,6 @@ const STORES = {
     tvAccessTokenSecret:
       process.env.TV_ACCESS_TOKEN_SECRET,
 
-
     // ----------------------------------------------
     // SHOPIFY CREDENTIALS
     // ----------------------------------------------
@@ -211,7 +212,6 @@ const STORES = {
 
     shopifyToken:
       process.env.SHOPIFY_ACCESS_TOKEN,
-
 
     // ----------------------------------------------
     // AKL AUTOMATION SCRIPTS
@@ -271,33 +271,42 @@ const STORES = {
           path.join(
             ROOT_DIR,
             "AKL",
+            "set-delivery-metafield.js"
+          ),
+
+          // Backwards-compatible fallback
+          path.join(
+            ROOT_DIR,
+            "AKL",
             "set-delivery-metafiled.js"
           ),
         ],
         path.join(
           ROOT_DIR,
           "AKL",
-          "set-delivery-metafiled.js"
+          "set-delivery-metafield.js"
         )
       ),
 
+    // IMPORTANT:
+    // This is the confirmed correct AKL Shopify
+    // listing script.
     shopifyListingScript:
       firstExistingPath(
         [
           path.join(
             ROOT_DIR,
             "AKL",
-            "shopify-old-listing.js"
+            "test-shopify-old-listing.js"
           ),
         ],
         path.join(
           ROOT_DIR,
           "AKL",
-          "shopify-old-listing.js"
+          "test-shopify-old-listing.js"
         )
       ),
   },
-
 
   // ==================================================
   // WLG
@@ -310,7 +319,6 @@ const STORES = {
     name: "Wellington",
 
     shortName: "WLG",
-
 
     // ----------------------------------------------
     // STATE
@@ -334,23 +342,27 @@ const STORES = {
       "automation-wlg.log"
     ),
 
-
     // ----------------------------------------------
     // SHOPIFY
     // ----------------------------------------------
 
-    shopifyEnabled: false,
+    shopifyEnabled:
+      false,
 
-    shopifyTag: null,
+    shopifyTag:
+      null,
 
-    shopifyMetafieldNamespace: null,
+    shopifyMetafieldNamespace:
+      null,
 
-    shopifyMetafieldKey: null,
+    shopifyMetafieldKey:
+      null,
 
-    shopifyListingResultsFile: null,
+    shopifyListingResultsFile:
+      null,
 
-    shopifyResolvedFile: null,
-
+    shopifyResolvedFile:
+      null,
 
     // ----------------------------------------------
     // TRADEVINE
@@ -367,7 +379,6 @@ const STORES = {
 
     tvAccessTokenSecret:
       process.env.WLG_TV_ACCESS_TOKEN_SECRET,
-
 
     // ----------------------------------------------
     // AUTOMATION
@@ -416,8 +427,29 @@ const STORES = {
           "resolve-blocked-wlg.js"
         )
       ),
-  },
 
+    cleanupScript:
+      null,
+
+    deliveryScript:
+      firstExistingPath(
+        [
+          path.join(
+            ROOT_DIR,
+            "WLG",
+            "set-delivery-metafield-wlg.js"
+          ),
+        ],
+        path.join(
+          ROOT_DIR,
+          "WLG",
+          "set-delivery-metafield-wlg.js"
+        )
+      ),
+
+    shopifyListingScript:
+      null,
+  },
 
   // ==================================================
   // CHCH
@@ -430,7 +462,6 @@ const STORES = {
     name: "Christchurch",
 
     shortName: "CHCH",
-
 
     // ----------------------------------------------
     // STATE
@@ -454,23 +485,27 @@ const STORES = {
       "automation-chch.log"
     ),
 
-
     // ----------------------------------------------
     // SHOPIFY
     // ----------------------------------------------
 
-    shopifyEnabled: false,
+    shopifyEnabled:
+      false,
 
-    shopifyTag: null,
+    shopifyTag:
+      null,
 
-    shopifyMetafieldNamespace: null,
+    shopifyMetafieldNamespace:
+      null,
 
-    shopifyMetafieldKey: null,
+    shopifyMetafieldKey:
+      null,
 
-    shopifyListingResultsFile: null,
+    shopifyListingResultsFile:
+      null,
 
-    shopifyResolvedFile: null,
-
+    shopifyResolvedFile:
+      null,
 
     // ----------------------------------------------
     // TRADEVINE
@@ -487,7 +522,6 @@ const STORES = {
 
     tvAccessTokenSecret:
       process.env.CHCH_TV_ACCESS_TOKEN_SECRET,
-
 
     // ----------------------------------------------
     // AUTOMATION
@@ -536,9 +570,30 @@ const STORES = {
           "resolve-blocked-chch.js"
         )
       ),
+
+    cleanupScript:
+      null,
+
+    deliveryScript:
+      firstExistingPath(
+        [
+          path.join(
+            ROOT_DIR,
+            "CHCH",
+            "set-delivery-metafield-chch.js"
+          ),
+        ],
+        path.join(
+          ROOT_DIR,
+          "CHCH",
+          "set-delivery-metafield-chch.js"
+        )
+      ),
+
+    shopifyListingScript:
+      null,
   },
 };
-
 
 // ==================================================
 // EXPRESS
@@ -552,17 +607,384 @@ app.use(
   })
 );
 
+app.use(
+  express.urlencoded({
+    extended: false,
+  })
+);
+
+// ==================================================
+// SESSION
+// ==================================================
+
+if (
+  process.env.NODE_ENV ===
+  "production"
+) {
+  app.set(
+    "trust proxy",
+    1
+  );
+}
+
+app.use(
+  session({
+    name:
+      "tsb_dashboard_session",
+
+    secret:
+      SESSION_SECRET,
+
+    resave:
+      false,
+
+    saveUninitialized:
+      false,
+
+    cookie: {
+      httpOnly:
+        true,
+
+      secure:
+        process.env.NODE_ENV ===
+        "production",
+
+      sameSite:
+        "lax",
+
+      maxAge:
+        8 *
+        60 *
+        60 *
+        1000,
+    },
+  })
+);
+
+// ==================================================
+// AUTHENTICATION HELPERS
+// ==================================================
+
+function isAuthenticated(
+  req
+) {
+  return (
+    req.session &&
+    req.session.authenticated ===
+      true
+  );
+}
+
+// ==================================================
+// LOGIN PAGE
+// ==================================================
+
+app.get(
+  "/login",
+  (
+    req,
+    res
+  ) => {
+
+    if (
+      isAuthenticated(req)
+    ) {
+      return res.redirect("/");
+    }
+
+    const hasError =
+      req.query.error === "1";
+
+    res.send(`
+      <!DOCTYPE html>
+      <html>
+      <head>
+
+        <title>
+          TSB Presale Automation Dashboard Login
+        </title>
+
+        <meta
+          name="viewport"
+          content="width=device-width, initial-scale=1"
+        >
+
+        <style>
+
+          body {
+            margin: 0;
+            font-family: Arial, sans-serif;
+            background: #f5f5f5;
+
+            display: flex;
+            align-items: center;
+            justify-content: center;
+
+            min-height: 100vh;
+          }
+
+          .login-box {
+            width: 350px;
+            background: white;
+
+            padding: 30px;
+
+            border-radius: 10px;
+
+            box-shadow:
+              0 5px 25px rgba(0, 0, 0, 0.12);
+          }
+
+          h2 {
+            margin-top: 0;
+            margin-bottom: 25px;
+
+            text-align: center;
+          }
+
+          input {
+            width: 100%;
+            box-sizing: border-box;
+
+            padding: 12px;
+
+            margin-bottom: 15px;
+
+            border: 1px solid #ccc;
+            border-radius: 5px;
+
+            font-size: 15px;
+          }
+
+          button {
+            width: 100%;
+
+            padding: 12px;
+
+            border: none;
+            border-radius: 5px;
+
+            background: #111;
+            color: white;
+
+            font-size: 15px;
+
+            cursor: pointer;
+          }
+
+          button:hover {
+            background: #333;
+          }
+
+          .error {
+            color: #c00;
+
+            text-align: center;
+
+            margin-bottom: 15px;
+          }
+
+        </style>
+
+      </head>
+
+      <body>
+
+        <div class="login-box">
+
+          <h2>
+            TSB Presale Dashboard
+          </h2>
+
+          ${
+            hasError
+              ? `
+                <div class="error">
+                  Invalid username or password.
+                </div>
+              `
+              : ""
+          }
+
+          <form
+            method="POST"
+            action="/login"
+          >
+
+            <input
+              type="text"
+              name="username"
+              placeholder="Username"
+              required
+              autofocus
+            />
+
+            <input
+              type="password"
+              name="password"
+              placeholder="Password"
+              required
+            />
+
+            <button type="submit">
+              Login
+            </button>
+
+          </form>
+
+        </div>
+
+      </body>
+      </html>
+    `);
+  }
+);
+
+// ==================================================
+// AUTHENTICATION MIDDLEWARE
+// ==================================================
+
+function requireAuthentication(
+  req,
+  res,
+  next
+) {
+
+  if (
+    req.path ===
+    "/login"
+  ) {
+    return next();
+  }
+
+  if (
+    isAuthenticated(req)
+  ) {
+    return next();
+  }
+
+  if (
+    req.path.startsWith(
+      "/api/"
+    )
+  ) {
+    return res.status(401).json({
+      ok:
+        false,
+
+      authenticated:
+        false,
+
+      error:
+        "Authentication required.",
+    });
+  }
+
+  return res.redirect(
+    "/login"
+  );
+}
+
+// ==================================================
+// LOGIN SUBMISSION
+// ==================================================
+
+app.post(
+  "/login",
+  (
+    req,
+    res
+  ) => {
+
+    const username =
+      String(
+        req.body?.username ||
+          ""
+      ).trim();
+
+    const password =
+      String(
+        req.body?.password ||
+          ""
+      );
+
+    if (
+      username !==
+        DASHBOARD_USERNAME ||
+      password !==
+        DASHBOARD_PASSWORD
+    ) {
+      return res.redirect(
+        "/login?error=1"
+      );
+    }
+
+    req.session.authenticated =
+      true;
+
+    req.session.username =
+      username;
+
+    req.session.loginTime =
+      new Date().toISOString();
+
+    return res.redirect("/");
+  }
+);
+
+// ==================================================
+// LOGOUT
+// ==================================================
+
+app.post(
+  "/logout",
+  (
+    req,
+    res
+  ) => {
+
+    req.session.destroy(
+      (err) => {
+
+        if (err) {
+
+          console.error(
+            "Logout error:",
+            err
+          );
+
+          return res.status(
+            500
+          ).send(
+            "Could not log out."
+          );
+        }
+
+        res.clearCookie(
+          "tsb_dashboard_session"
+        );
+
+        return res.redirect(
+          "/login"
+        );
+      }
+    );
+  }
+);
 
 // ==================================================
 // STATIC DASHBOARD
 // ==================================================
 
 app.use(
+  requireAuthentication
+);
+
+app.use(
   express.static(
     DASHBOARD_DIR
   )
 );
-
 
 // ==================================================
 // STORE HELPERS
@@ -571,14 +993,19 @@ app.use(
 function getStore(
   storeKey
 ) {
+
   const key =
     String(
-      storeKey || "akl"
+      storeKey ||
+        "akl"
     )
       .trim()
       .toLowerCase();
 
-  if (key === "all") {
+  if (
+    key ===
+    "all"
+  ) {
     return null;
   }
 
@@ -588,13 +1015,11 @@ function getStore(
   );
 }
 
-
 function getAllStores() {
   return Object.values(
     STORES
   );
 }
-
 
 // ==================================================
 // STATE
@@ -603,7 +1028,9 @@ function getAllStores() {
 function loadState(
   store
 ) {
+
   if (!store) {
+
     console.error(
       "loadState: store is missing"
     );
@@ -611,26 +1038,25 @@ function loadState(
     return {};
   }
 
-  console.log(
-    `[STATE READ] ${store.shortName} -> ${store.stateFile}`
-  );
-
-  if (!fileExists(store.stateFile)) {
-    console.warn(
-      `[STATE MISSING] ${store.shortName} -> ${store.stateFile}`
-    );
-
+  if (
+    !fileExists(
+      store.stateFile
+    )
+  ) {
     return {};
   }
 
   try {
+
     const raw =
       fs.readFileSync(
         store.stateFile,
         "utf8"
       );
 
-    if (!raw.trim()) {
+    if (
+      !raw.trim()
+    ) {
       return {};
     }
 
@@ -639,38 +1065,30 @@ function loadState(
 
     if (
       !state ||
-      typeof state !== "object" ||
+      typeof state !==
+        "object" ||
       Array.isArray(state)
     ) {
-      console.error(
-        `[STATE INVALID] ${store.shortName} state is not an object`
-      );
-
       return {};
     }
-
-    console.log(
-      `[STATE LOADED] ${store.shortName} -> ${
-        Object.keys(state).length
-      } records`
-    );
 
     return state;
 
   } catch (err) {
+
     console.error(
-      `[STATE ERROR] ${store.shortName} -> ${store.stateFile}: ${err.message}`
+      `[STATE ERROR] ${store.shortName}: ${err.message}`
     );
 
     return {};
   }
 }
 
-
 function saveState(
   store,
   state
 ) {
+
   if (
     !store ||
     !store.stateFile
@@ -693,12 +1111,7 @@ function saveState(
     ),
     "utf8"
   );
-
-  console.log(
-    `[STATE SAVED] ${store.shortName} -> ${store.stateFile}`
-  );
 }
-
 
 // ==================================================
 // SHOPIFY RESOLVED RECORDS
@@ -707,6 +1120,7 @@ function saveState(
 function loadShopifyResolved(
   store
 ) {
+
   if (
     !store ||
     !store.shopifyEnabled ||
@@ -719,6 +1133,7 @@ function loadShopifyResolved(
   }
 
   try {
+
     const data =
       JSON.parse(
         fs.readFileSync(
@@ -729,13 +1144,15 @@ function loadShopifyResolved(
 
     return (
       data &&
-      typeof data === "object" &&
+      typeof data ===
+        "object" &&
       !Array.isArray(data)
     )
       ? data
       : {};
 
   } catch (err) {
+
     console.error(
       `Could not read ${store.shortName} Shopify resolved file:`,
       err.message
@@ -745,11 +1162,11 @@ function loadShopifyResolved(
   }
 }
 
-
 function saveShopifyResolved(
   store,
   data
 ) {
+
   if (
     !store ||
     !store.shopifyEnabled ||
@@ -773,11 +1190,11 @@ function saveShopifyResolved(
   );
 }
 
-
 function markShopifyBlockResolved(
   store,
   code
 ) {
+
   if (
     !store.shopifyEnabled
   ) {
@@ -796,7 +1213,8 @@ function markShopifyBlockResolved(
 
   resolved[
     normalisedCode
-  ] = new Date().toISOString();
+  ] =
+    new Date().toISOString();
 
   saveShopifyResolved(
     store,
@@ -810,7 +1228,6 @@ function markShopifyBlockResolved(
   );
 }
 
-
 // ==================================================
 // SHOPIFY LISTING BLOCKED PRODUCTS
 // ==================================================
@@ -818,6 +1235,7 @@ function markShopifyBlockResolved(
 function loadShopifyListingBlockedProducts(
   store
 ) {
+
   if (
     !store ||
     !store.shopifyEnabled ||
@@ -830,6 +1248,7 @@ function loadShopifyListingBlockedProducts(
   }
 
   try {
+
     const data =
       JSON.parse(
         fs.readFileSync(
@@ -854,6 +1273,7 @@ function loadShopifyListingBlockedProducts(
 
     data.forEach(
       (run) => {
+
         if (
           !Array.isArray(
             run.products
@@ -864,6 +1284,7 @@ function loadShopifyListingBlockedProducts(
 
         run.products.forEach(
           (item) => {
+
             if (
               !item.productCode
             ) {
@@ -883,6 +1304,7 @@ function loadShopifyListingBlockedProducts(
               null;
 
             const record = {
+
               code,
 
               poNumber:
@@ -927,6 +1349,7 @@ function loadShopifyListingBlockedProducts(
               latest.get(code);
 
             if (!existing) {
+
               latest.set(
                 code,
                 record
@@ -965,6 +1388,7 @@ function loadShopifyListingBlockedProducts(
 
     latest.forEach(
       (item, code) => {
+
         if (
           item.status !==
           "blocked"
@@ -976,6 +1400,7 @@ function loadShopifyListingBlockedProducts(
           resolved[code];
 
         if (resolvedAt) {
+
           const blockedTime =
             new Date(
               item.detectedAt ||
@@ -1008,6 +1433,7 @@ function loadShopifyListingBlockedProducts(
     return results;
 
   } catch (err) {
+
     console.error(
       `Could not read ${store.shortName} Shopify listing results:`,
       err.message
@@ -1017,7 +1443,6 @@ function loadShopifyListingBlockedProducts(
   }
 }
 
-
 // ==================================================
 // GRADUATIONS
 // ==================================================
@@ -1025,6 +1450,7 @@ function loadShopifyListingBlockedProducts(
 function loadGraduations(
   store
 ) {
+
   if (
     !store ||
     !store.graduationFile ||
@@ -1036,6 +1462,7 @@ function loadGraduations(
   }
 
   try {
+
     const data =
       JSON.parse(
         fs.readFileSync(
@@ -1049,6 +1476,7 @@ function loadGraduations(
       : [];
 
   } catch (err) {
+
     console.error(
       `Could not read ${store.shortName} graduation file:`,
       err.message
@@ -1058,7 +1486,6 @@ function loadGraduations(
   }
 }
 
-
 // ==================================================
 // LOGS
 // ==================================================
@@ -1066,6 +1493,7 @@ function loadGraduations(
 function loadLogs(
   store
 ) {
+
   if (
     !store ||
     !store.logFile ||
@@ -1077,6 +1505,7 @@ function loadLogs(
   }
 
   try {
+
     return fs
       .readFileSync(
         store.logFile,
@@ -1084,27 +1513,37 @@ function loadLogs(
       )
       .split(/\r?\n/)
       .filter(Boolean)
-      .map((line) => {
-        try {
-          return JSON.parse(
-            line
-          );
-        } catch {
-          return {
-            time: null,
+      .map(
+        (line) => {
 
-            type: "info",
+          try {
 
-            msg: line,
+            return JSON.parse(
+              line
+            );
 
-            store:
-              store.key,
-          };
+          } catch {
+
+            return {
+              time:
+                null,
+
+              type:
+                "info",
+
+              msg:
+                line,
+
+              store:
+                store.key,
+            };
+          }
         }
-      })
+      )
       .reverse();
 
   } catch (err) {
+
     console.error(
       `Could not read ${store.shortName} log:`,
       err.message
@@ -1114,16 +1553,33 @@ function loadLogs(
   }
 }
 
-
 // ==================================================
-// LOG EVENT
+// STRUCTURED LOG EVENT
+// ==================================================
+//
+// Main dashboard logs intentionally remain short.
+//
+// Example:
+//
+// {
+//   "time":"2026-09-08T10:05:21.000Z",
+//   "type":"automation_start",
+//   "store":"akl",
+//   "msg":"AKL automation started"
+// }
+//
+// Detailed child stdout/stderr is NOT written here.
+// It is stored in debug-logs instead.
+//
 // ==================================================
 
 function logEvent(
   store,
   type,
-  msg
+  msg,
+  extra = {}
 ) {
+
   const entry = {
     time:
       new Date().toISOString(),
@@ -1135,14 +1591,9 @@ function logEvent(
     store:
       store?.key ||
       "unknown",
-  };
 
-  console.log(
-    `[${type.toUpperCase()}] [${
-      store?.shortName ||
-      "UNKNOWN"
-    }] ${msg}`
-  );
+    ...extra,
+  };
 
   const logFile =
     store?.logFile ||
@@ -1159,8 +1610,80 @@ function logEvent(
     ) + "\n",
     "utf8"
   );
+
+  console.log(
+    `[${type.toUpperCase()}] [${
+      store?.shortName ||
+      "UNKNOWN"
+    }] ${msg}`
+  );
 }
 
+// ==================================================
+// DEBUG LOG
+// ==================================================
+
+function createDebugLogFile(
+  store
+) {
+
+  const timestamp =
+    new Date()
+      .toISOString()
+      .replace(
+        /[:.]/g,
+        "-"
+      );
+
+  const directory =
+    path.join(
+      DEBUG_LOG_DIR,
+      store.key.toUpperCase()
+    );
+
+  if (
+    !fs.existsSync(
+      directory
+    )
+  ) {
+    fs.mkdirSync(
+      directory,
+      {
+        recursive:
+          true,
+      }
+    );
+  }
+
+  return path.join(
+    directory,
+    `${timestamp}.log`
+  );
+}
+
+function writeDebugLog(
+  debugStream,
+  text
+) {
+
+  if (
+    !debugStream ||
+    !text
+  ) {
+    return;
+  }
+
+  try {
+
+    debugStream.write(
+      text
+    );
+
+  } catch {
+    // Debug logging must never
+    // break the automation.
+  }
+}
 
 // ==================================================
 // TRADEVINE OAUTH
@@ -1169,6 +1692,7 @@ function logEvent(
 function createOAuth(
   store
 ) {
+
   return OAuth({
     consumer: {
       key:
@@ -1195,7 +1719,6 @@ function createOAuth(
   });
 }
 
-
 // ==================================================
 // TRADEVINE GET
 // ==================================================
@@ -1204,6 +1727,7 @@ async function tradevineGet(
   store,
   url
 ) {
+
   const oauth =
     createOAuth(
       store
@@ -1222,7 +1746,8 @@ async function tradevineGet(
       oauth.authorize(
         {
           url,
-          method: "GET",
+          method:
+            "GET",
         },
         token
       )
@@ -1232,7 +1757,8 @@ async function tradevineGet(
     await fetch(
       url,
       {
-        method: "GET",
+        method:
+          "GET",
 
         headers: {
           ...authHeader,
@@ -1249,11 +1775,14 @@ async function tradevineGet(
   let data = null;
 
   try {
+
     data =
       JSONbig.parse(
         text
       );
+
   } catch {
+
     data = null;
   }
 
@@ -1268,7 +1797,6 @@ async function tradevineGet(
   };
 }
 
-
 // ==================================================
 // TRADEVINE — PURCHASE ORDERS
 // ==================================================
@@ -1276,7 +1804,9 @@ async function tradevineGet(
 async function getAwaitingReceiptPOs(
   store
 ) {
+
   try {
+
     const url =
       "https://api.tradevine.com/v1/PurchaseOrder" +
       "?pageNumber=1" +
@@ -1293,6 +1823,7 @@ async function getAwaitingReceiptPOs(
       result.status !== 200 ||
       !result.data
     ) {
+
       console.error(
         `${store.shortName} PurchaseOrder lookup failed:`,
         result.status,
@@ -1303,11 +1834,14 @@ async function getAwaitingReceiptPOs(
       );
 
       return {
-        count: 0,
+        count:
+          0,
 
-        orders: [],
+        orders:
+          [],
 
-        error: true,
+        error:
+          true,
       };
     }
 
@@ -1317,6 +1851,7 @@ async function getAwaitingReceiptPOs(
       [];
 
     return {
+
       count:
         result.data.TotalCount ??
         list.length,
@@ -1348,25 +1883,29 @@ async function getAwaitingReceiptPOs(
           })
         ),
 
-      error: false,
+      error:
+        false,
     };
 
   } catch (err) {
+
     console.error(
       `Could not retrieve ${store.shortName} awaiting POs:`,
       err.message
     );
 
     return {
-      count: 0,
+      count:
+        0,
 
-      orders: [],
+      orders:
+        [],
 
-      error: true,
+      error:
+        true,
     };
   }
 }
-
 
 // ==================================================
 // PRODUCT CODE EXTRACTION
@@ -1375,6 +1914,7 @@ async function getAwaitingReceiptPOs(
 function extractProductCodesFromText(
   text
 ) {
+
   if (!text) {
     return [];
   }
@@ -1390,7 +1930,6 @@ function extractProductCodesFromText(
   );
 }
 
-
 // ==================================================
 // LAST AUTOMATION RUN
 // ==================================================
@@ -1398,6 +1937,7 @@ function extractProductCodesFromText(
 function getLastRun(
   logs
 ) {
+
   const runMessages = [
     "automation run",
     "bom-automation",
@@ -1414,19 +1954,25 @@ function getLastRun(
   for (
     const entry of logs
   ) {
-    if (!entry.time) {
+
+    if (
+      !entry.time
+    ) {
       continue;
     }
 
     const msg =
       String(
-        entry.msg || ""
+        entry.msg ||
+          ""
       ).toLowerCase();
 
     if (
       runMessages.some(
         (term) =>
-          msg.includes(term)
+          msg.includes(
+            term
+          )
       )
     ) {
       return entry.time;
@@ -1436,7 +1982,6 @@ function getLastRun(
   return null;
 }
 
-
 // ==================================================
 // PROCESSED PRODUCTS
 // ==================================================
@@ -1445,6 +1990,7 @@ function getProcessedProducts(
   state,
   logs
 ) {
+
   const products =
     new Set();
 
@@ -1460,6 +2006,7 @@ function getProcessedProducts(
     state
   ).forEach(
     ([key, value]) => {
+
       if (
         !key.startsWith(
           "inv:"
@@ -1481,6 +2028,7 @@ function getProcessedProducts(
       if (
         parts.length >= 3
       ) {
+
         const productCode =
           parts
             .slice(2)
@@ -1499,24 +2047,23 @@ function getProcessedProducts(
     }
   );
 
-
-  // ----------------------------------------------
-  // GRADUATED PRODUCTS
-  // ----------------------------------------------
-
   if (
     Array.isArray(logs)
   ) {
+
     logs.forEach(
       (entry) => {
+
         const msg =
-          entry?.msg || "";
+          entry?.msg ||
+          "";
 
         if (
           /graduated/i.test(
             msg
           )
         ) {
+
           const codes =
             extractProductCodesFromText(
               msg
@@ -1536,7 +2083,6 @@ function getProcessedProducts(
   return products;
 }
 
-
 // ==================================================
 // PROCESSED PRODUCT DETAILS
 // ==================================================
@@ -1544,6 +2090,7 @@ function getProcessedProducts(
 function getProcessedProductDetails(
   store
 ) {
+
   const state =
     loadState(
       store
@@ -1560,7 +2107,6 @@ function getProcessedProductDetails(
     return [];
   }
 
-
   // ----------------------------------------------
   // INVENTORY
   // ----------------------------------------------
@@ -1569,6 +2115,7 @@ function getProcessedProductDetails(
     state
   ).forEach(
     ([key, value]) => {
+
       if (
         !key.startsWith(
           "inv:"
@@ -1594,7 +2141,8 @@ function getProcessedProductDetails(
       }
 
       const poNumber =
-        parts[1] || "—";
+        parts[1] ||
+        "—";
 
       const code =
         parts
@@ -1638,7 +2186,6 @@ function getProcessedProductDetails(
     }
   );
 
-
   // ----------------------------------------------
   // TITLE
   // ----------------------------------------------
@@ -1647,6 +2194,7 @@ function getProcessedProductDetails(
     state
   ).forEach(
     ([key, value]) => {
+
       if (
         !key.startsWith(
           "title:"
@@ -1680,6 +2228,7 @@ function getProcessedProductDetails(
           code
         )
       ) {
+
         products.set(
           code,
           {
@@ -1713,7 +2262,6 @@ function getProcessedProductDetails(
     }
   );
 
-
   // ----------------------------------------------
   // BOM
   // ----------------------------------------------
@@ -1722,6 +2270,7 @@ function getProcessedProductDetails(
     state
   ).forEach(
     ([key, value]) => {
+
       if (
         !key.startsWith(
           "bom:"
@@ -1755,6 +2304,7 @@ function getProcessedProductDetails(
           code
         )
       ) {
+
         products.set(
           code,
           {
@@ -1788,7 +2338,6 @@ function getProcessedProductDetails(
     }
   );
 
-
   return Array.from(
     products.values()
   ).sort(
@@ -1799,7 +2348,6 @@ function getProcessedProductDetails(
   );
 }
 
-
 // ==================================================
 // BOM BLOCKED PRODUCTS
 // ==================================================
@@ -1808,6 +2356,7 @@ function getBomBlockedProducts(
   store,
   state
 ) {
+
   return Object.entries(
     state
   )
@@ -1868,7 +2417,6 @@ function getBomBlockedProducts(
     );
 }
 
-
 // ==================================================
 // ALL BLOCKED PRODUCTS
 // ==================================================
@@ -1877,6 +2425,7 @@ function getAllBlockedProducts(
   store,
   state
 ) {
+
   const bomBlocked =
     getBomBlockedProducts(
       store,
@@ -1890,21 +2439,6 @@ function getAllBlockedProducts(
         )
       : [];
 
-
-  // ------------------------------------------------
-  // IMPORTANT
-  // ------------------------------------------------
-  //
-  // BOM and Shopify blocks are separate records.
-  //
-  // Example:
-  //
-  // PR15301 | BOM
-  // PR15301 | Shopify
-  //
-  // Both remain visible.
-  //
-
   const combined = [
     ...bomBlocked,
     ...shopifyBlocked,
@@ -1913,14 +2447,15 @@ function getAllBlockedProducts(
   return combined.sort(
     (a, b) =>
       new Date(
-        b.detectedAt || 0
+        b.detectedAt ||
+          0
       ).getTime() -
       new Date(
-        a.detectedAt || 0
+        a.detectedAt ||
+          0
       ).getTime()
   );
 }
-
 
 // ==================================================
 // RUN REMOVE-BLOCKED
@@ -1934,6 +2469,7 @@ function runResolveBlocked(
   reason,
   source
 ) {
+
   const scriptPath =
     store.resolveScript;
 
@@ -1942,46 +2478,43 @@ function runResolveBlocked(
       scriptPath
     )
   ) {
+
     logEvent(
       store,
       "error",
-      `${code}: resolve script not found at ${scriptPath}`
+      `${code}: resolve script not found`,
+      {
+        action:
+          "resolve",
+        status:
+          "failed",
+      }
     );
 
     return false;
   }
 
-
   logEvent(
     store,
-    "info",
-    `${code}: STARTING ${path.basename(
-      scriptPath
-    )}`
+    "resolve_start",
+    `${code}: starting blocked-product resolution`,
+    {
+      productCode:
+        code,
+
+      poNumber:
+        poNumber,
+
+      source:
+        source ||
+        "unknown",
+    }
   );
-
-
-  logEvent(
-    store,
-    "info",
-    `${code}: resolve script path = ${scriptPath}`
-  );
-
-
-  logEvent(
-    store,
-    "info",
-    `${code}: PO = ${poNumber}, source = ${
-      source || "unknown"
-    }, reason = ${
-      reason || "unknown"
-    }`
-  );
-
 
   let result;
 
   try {
+
     result =
       spawnSync(
         process.execPath,
@@ -2024,103 +2557,99 @@ function runResolveBlocked(
       );
 
   } catch (err) {
+
     logEvent(
       store,
       "error",
-      `${code}: resolve script spawn crashed - ${err.message}`
+      `${code}: resolve script failed to start`,
+      {
+        productCode:
+          code,
+
+        status:
+          "failed",
+
+        error:
+          err.message,
+      }
     );
 
     return false;
   }
 
-
-  if (
-    result.stdout
-  ) {
-    console.log(
-      `\n========== ${store.shortName} ${code} RESOLVE STDOUT ==========\n`
-    );
-
-    console.log(
-      result.stdout
-    );
-
-    console.log(
-      `\n========== END ${store.shortName} ${code} STDOUT ==========\n`
-    );
-
-    logEvent(
-      store,
-      "info",
-      `${code}: resolve script stdout:\n${result.stdout.slice(
-        0,
-        10000
-      )}`
-    );
-  }
-
-
-  if (
-    result.stderr
-  ) {
-    console.error(
-      `\n========== ${store.shortName} ${code} RESOLVE STDERR ==========\n`
-    );
-
-    console.error(
-      result.stderr
-    );
-
-    console.error(
-      `\n========== END ${store.shortName} ${code} STDERR ==========\n`
-    );
-
-    logEvent(
-      store,
-      "error",
-      `${code}: resolve script stderr:\n${result.stderr.slice(
-        0,
-        10000
-      )}`
-    );
-  }
-
+  // ------------------------------------------------
+  // IMPORTANT:
+  // Do NOT put full stdout/stderr into automation.log.
+  // ------------------------------------------------
 
   if (
     result.error
   ) {
+
     logEvent(
       store,
       "error",
-      `${code}: could not start resolve script - ${result.error.message}`
+      `${code}: resolve process error`,
+      {
+        productCode:
+          code,
+
+        status:
+          "failed",
+
+        error:
+          result.error.message,
+      }
     );
 
     return false;
   }
-
 
   if (
     result.status !== 0
   ) {
+
     logEvent(
       store,
       "error",
-      `${code}: resolve script FAILED with exit code ${result.status}`
+      `${code}: resolve script failed`,
+      {
+        productCode:
+          code,
+
+        status:
+          "failed",
+
+        exitCode:
+          result.status,
+      }
     );
 
     return false;
   }
 
-
   logEvent(
     store,
-    "success",
-    `${code}: resolve script completed successfully`
+    "resolve_complete",
+    `${code}: blocked-product resolution completed successfully`,
+    {
+      productCode:
+        code,
+
+      poNumber:
+        poNumber,
+
+      source:
+        source ||
+        "unknown",
+
+      status:
+        "success",
+    }
   );
 
   return true;
 }
-
 
 // ==================================================
 // OVERVIEW BUILDER
@@ -2129,6 +2658,7 @@ function runResolveBlocked(
 async function buildStoreOverview(
   store
 ) {
+
   const state =
     loadState(
       store
@@ -2172,6 +2702,7 @@ async function buildStoreOverview(
   const graduatedThisWeek =
     graduations.filter(
       (entry) => {
+
         const dateValue =
           entry?.date ||
           entry?.graduatedAt ||
@@ -2193,7 +2724,6 @@ async function buildStoreOverview(
       }
     ).length;
 
-
   const lastRun =
     getLastRun(
       logs
@@ -2212,17 +2742,21 @@ async function buildStoreOverview(
           Math.min(
             100,
             Math.round(
-              ((processed -
-                blocked) /
-                processed) *
-                100
+              (
+                (
+                  processed -
+                  blocked
+                ) /
+                processed
+              ) *
+              100
             )
           )
         )
       : 100;
 
-
   return {
+
     store:
       store.key,
 
@@ -2346,7 +2880,6 @@ async function buildStoreOverview(
   };
 }
 
-
 // ==================================================
 // API — OVERVIEW
 // ==================================================
@@ -2357,7 +2890,9 @@ app.get(
     req,
     res
   ) => {
+
     try {
+
       const requestedStore =
         String(
           req.query.store ||
@@ -2370,11 +2905,14 @@ app.get(
         requestedStore ===
         "all"
       ) {
+
         const result = {};
 
         for (
-          const store of getAllStores()
+          const store of
+          getAllStores()
         ) {
+
           result[
             store.key
           ] =
@@ -2407,6 +2945,7 @@ app.get(
       );
 
     } catch (err) {
+
       console.error(
         "Overview error:",
         err
@@ -2422,7 +2961,6 @@ app.get(
   }
 );
 
-
 // ==================================================
 // API — ALL STORE OVERVIEW
 // ==================================================
@@ -2433,12 +2971,16 @@ app.get(
     req,
     res
   ) => {
+
     try {
+
       const result = {};
 
       for (
-        const store of getAllStores()
+        const store of
+        getAllStores()
       ) {
+
         result[
           store.key
         ] =
@@ -2448,6 +2990,7 @@ app.get(
       }
 
       return res.json({
+
         stores:
           result,
 
@@ -2456,6 +2999,7 @@ app.get(
       });
 
     } catch (err) {
+
       console.error(
         "All-store overview error:",
         err
@@ -2471,7 +3015,6 @@ app.get(
   }
 );
 
-
 // ==================================================
 // API — GRADUATIONS
 // ==================================================
@@ -2482,7 +3025,9 @@ app.get(
     req,
     res
   ) => {
+
     try {
+
       const requestedStore =
         String(
           req.query.store ||
@@ -2495,10 +3040,12 @@ app.get(
         requestedStore ===
         "all"
       ) {
+
         const results = [];
 
         getAllStores().forEach(
           (store) => {
+
             const graduations =
               loadGraduations(
                 store
@@ -2515,6 +3062,7 @@ app.get(
             graduations
               .filter(
                 (entry) => {
+
                   const dateValue =
                     entry?.date ||
                     entry?.graduatedAt ||
@@ -2537,6 +3085,7 @@ app.get(
               )
               .forEach(
                 (entry) => {
+
                   results.push({
                     ...entry,
 
@@ -2577,6 +3126,7 @@ app.get(
       const recent =
         graduations.filter(
           (entry) => {
+
             const dateValue =
               entry?.date ||
               entry?.graduatedAt ||
@@ -2613,6 +3163,7 @@ app.get(
       );
 
     } catch (err) {
+
       console.error(
         "Graduations error:",
         err
@@ -2628,7 +3179,6 @@ app.get(
   }
 );
 
-
 // ==================================================
 // API — PURCHASE ORDERS
 // ==================================================
@@ -2639,7 +3189,9 @@ app.get(
     req,
     res
   ) => {
+
     try {
+
       const requestedStore =
         String(
           req.query.store ||
@@ -2648,19 +3200,18 @@ app.get(
           .trim()
           .toLowerCase();
 
-      // --------------------------------------------
-      // ALL STORES
-      // --------------------------------------------
-
       if (
         requestedStore ===
         "all"
       ) {
+
         const results = [];
 
         for (
-          const store of getAllStores()
+          const store of
+          getAllStores()
         ) {
+
           const result =
             await getAwaitingReceiptPOs(
               store
@@ -2682,20 +3233,17 @@ app.get(
         }
 
         return res.json({
+
           count:
             results.length,
 
           orders:
             results,
 
-          error: false,
+          error:
+            false,
         });
       }
-
-
-      // --------------------------------------------
-      // SINGLE STORE
-      // --------------------------------------------
 
       const store =
         getStore(
@@ -2708,6 +3256,7 @@ app.get(
         );
 
       return res.json({
+
         ...result,
 
         store:
@@ -2718,6 +3267,7 @@ app.get(
       });
 
     } catch (err) {
+
       console.error(
         "Purchase order error:",
         err
@@ -2726,17 +3276,19 @@ app.get(
       return res.status(
         500
       ).json({
+
         error:
           err.message,
 
-        orders: [],
+        orders:
+          [],
 
-        count: 0,
+        count:
+          0,
       });
     }
   }
 );
-
 
 // ==================================================
 // API — STATE
@@ -2748,7 +3300,9 @@ app.get(
     req,
     res
   ) => {
+
     try {
+
       const requestedStore =
         String(
           req.query.store ||
@@ -2761,10 +3315,12 @@ app.get(
         requestedStore ===
         "all"
       ) {
+
         const states = {};
 
         getAllStores().forEach(
           (store) => {
+
             states[
               store.key
             ] =
@@ -2791,6 +3347,7 @@ app.get(
       );
 
     } catch (err) {
+
       return res.status(
         500
       ).json({
@@ -2800,7 +3357,6 @@ app.get(
     }
   }
 );
-
 
 // ==================================================
 // API — PRODUCTS
@@ -2812,7 +3368,9 @@ app.get(
     req,
     res
   ) => {
+
     try {
+
       const requestedStore =
         String(
           req.query.store ||
@@ -2821,16 +3379,17 @@ app.get(
           .trim()
           .toLowerCase();
 
-
       if (
         requestedStore ===
         "all"
       ) {
+
         const allProducts =
           [];
 
         getAllStores().forEach(
           (store) => {
+
             const products =
               getProcessedProductDetails(
                 store
@@ -2842,12 +3401,12 @@ app.get(
           }
         );
 
-
         const unique =
           new Map();
 
         allProducts.forEach(
           (product) => {
+
             const key =
               `${product.store}:${product.code}`;
 
@@ -2856,6 +3415,7 @@ app.get(
                 key
               )
             ) {
+
               unique.set(
                 key,
                 product
@@ -2863,7 +3423,6 @@ app.get(
             }
           }
         );
-
 
         return res.json(
           Array.from(
@@ -2877,7 +3436,6 @@ app.get(
         );
       }
 
-
       const store =
         getStore(
           requestedStore
@@ -2890,6 +3448,7 @@ app.get(
       );
 
     } catch (err) {
+
       console.error(
         "Products error:",
         err
@@ -2905,7 +3464,6 @@ app.get(
   }
 );
 
-
 // ==================================================
 // API — BLOCKED
 // ==================================================
@@ -2916,7 +3474,9 @@ app.get(
     req,
     res
   ) => {
+
     try {
+
       const requestedStore =
         String(
           req.query.store ||
@@ -2925,15 +3485,16 @@ app.get(
           .trim()
           .toLowerCase();
 
-
       if (
         requestedStore ===
         "all"
       ) {
+
         const result = [];
 
         getAllStores().forEach(
           (store) => {
+
             const state =
               loadState(
                 store
@@ -2951,10 +3512,12 @@ app.get(
         result.sort(
           (a, b) =>
             new Date(
-              b.detectedAt || 0
+              b.detectedAt ||
+                0
             ).getTime() -
             new Date(
-              a.detectedAt || 0
+              a.detectedAt ||
+                0
             ).getTime()
         );
 
@@ -2962,7 +3525,6 @@ app.get(
           result
         );
       }
-
 
       const store =
         getStore(
@@ -2985,6 +3547,7 @@ app.get(
       );
 
     } catch (err) {
+
       console.error(
         "Blocked products error:",
         err
@@ -3000,7 +3563,6 @@ app.get(
   }
 );
 
-
 // ==================================================
 // API — LOGS
 // ==================================================
@@ -3011,7 +3573,9 @@ app.get(
     req,
     res
   ) => {
+
     try {
+
       const requestedStore =
         String(
           req.query.store ||
@@ -3020,16 +3584,17 @@ app.get(
           .trim()
           .toLowerCase();
 
-
       if (
         requestedStore ===
         "all"
       ) {
+
         const allLogs =
           [];
 
         getAllStores().forEach(
           (store) => {
+
             allLogs.push(
               ...loadLogs(
                 store
@@ -3038,17 +3603,17 @@ app.get(
           }
         );
 
-
         allLogs.sort(
           (a, b) =>
             new Date(
-              b.time || 0
+              b.time ||
+                0
             ).getTime() -
             new Date(
-              a.time || 0
+              a.time ||
+                0
             ).getTime()
         );
-
 
         return res.json(
           allLogs.slice(
@@ -3057,7 +3622,6 @@ app.get(
           )
         );
       }
-
 
       const store =
         getStore(
@@ -3074,6 +3638,7 @@ app.get(
       );
 
     } catch (err) {
+
       return res.status(
         500
       ).json({
@@ -3083,7 +3648,6 @@ app.get(
     }
   }
 );
-
 
 // ==================================================
 // API — MARK RESOLVED
@@ -3095,7 +3659,9 @@ app.post(
     req,
     res
   ) => {
+
     try {
+
       const {
         code,
         poNumber,
@@ -3104,23 +3670,25 @@ app.post(
         source,
         store:
           requestedStore,
-      } = req.body || {};
-
+      } =
+        req.body || {};
 
       if (
         !code ||
         !poNumber
       ) {
+
         return res.status(
           400
         ).json({
-          ok: false,
+
+          ok:
+            false,
 
           error:
             "Product code and PO number are required.",
         });
       }
-
 
       const requested =
         String(
@@ -3130,56 +3698,65 @@ app.post(
           .trim()
           .toLowerCase();
 
-
       if (
         requested ===
         "all"
       ) {
+
         return res.status(
           400
         ).json({
-          ok: false,
+
+          ok:
+            false,
 
           error:
             "A specific store is required to resolve a product.",
         });
       }
 
-
       const store =
         getStore(
           requested
         );
-
 
       const normalisedCode =
         String(code)
           .trim()
           .toUpperCase();
 
-
       const normalisedSource =
         String(
-          source || ""
+          source ||
+            ""
         )
           .trim()
           .toLowerCase();
-
 
       const normalisedReason =
         String(
-          reason || ""
+          reason ||
+            ""
         )
           .trim()
           .toLowerCase();
 
-
       logEvent(
         store,
-        "info",
-        `${normalisedCode}: Mark Resolved clicked for ${store.shortName}`
-      );
+        "resolve_requested",
+        `${normalisedCode}: Mark Resolved clicked`,
+        {
+          productCode:
+            normalisedCode,
 
+          poNumber:
+            poNumber,
+
+          source:
+            normalisedSource ||
+            "unknown",
+        }
+      );
 
       // ==================================================
       // SHOPIFY BLOCK
@@ -3194,14 +3771,6 @@ app.post(
             "shopify"
         )
       ) {
-        logEvent(
-          store,
-          "info",
-          `${normalisedCode}: Shopify block resolved from dashboard - starting ${path.basename(
-            store.resolveScript
-          )}`
-        );
-
 
         const success =
           runResolveBlocked(
@@ -3213,18 +3782,27 @@ app.post(
             normalisedSource
           );
 
-
         if (!success) {
+
           logEvent(
             store,
             "error",
-            `${normalisedCode}: Shopify resolve script failed - block remains active`
+            `${normalisedCode}: Shopify resolve failed - block remains active`,
+            {
+              productCode:
+                normalisedCode,
+
+              status:
+                "blocked",
+            }
           );
 
           return res.status(
             500
           ).json({
-            ok: false,
+
+            ok:
+              false,
 
             code:
               normalisedCode,
@@ -3240,22 +3818,28 @@ app.post(
           });
         }
 
-
         markShopifyBlockResolved(
           store,
           normalisedCode
         );
 
-
         logEvent(
           store,
-          "success",
-          `${normalisedCode}: Shopify resolve completed successfully`
+          "resolve_success",
+          `${normalisedCode}: Shopify block resolved successfully`,
+          {
+            productCode:
+              normalisedCode,
+
+            status:
+              "success",
+          }
         );
 
-
         return res.json({
-          ok: true,
+
+          ok:
+            true,
 
           code:
             normalisedCode,
@@ -3271,7 +3855,6 @@ app.post(
         });
       }
 
-
       // ==================================================
       // BOM BLOCK
       // ==================================================
@@ -3284,27 +3867,16 @@ app.post(
       const now =
         new Date().toISOString();
 
-
       delete state[
         `blocked:${normalisedCode}`
       ];
 
-
-      // ----------------------------------------------
-      // IMPORTANT
-      // ----------------------------------------------
-      //
-      // PO remains part of the inventory key.
-      //
-      // This allows the same product to enter a new
-      // presale cycle under a NEW PO.
-      //
-      // ----------------------------------------------
-
       state[
         `inv:${poNumber}:${normalisedCode}`
       ] = {
-        done: true,
+
+        done:
+          true,
 
         date:
           now,
@@ -3316,12 +3888,13 @@ app.post(
         note:
           "manually actioned by staff via dashboard",
       };
-
 
       state[
         `title:${normalisedCode}`
       ] = {
-        done: true,
+
+        done:
+          true,
 
         date:
           now,
@@ -3333,23 +3906,35 @@ app.post(
         note:
           "manually actioned by staff via dashboard",
       };
-
 
       saveState(
         store,
         state
       );
 
-
       logEvent(
         store,
-        "success",
-        `Staff resolved ${normalisedCode} BOM block via ${store.shortName} dashboard`
+        "resolve_success",
+        `${normalisedCode}: BOM block resolved manually`,
+        {
+          productCode:
+            normalisedCode,
+
+          poNumber:
+            poNumber,
+
+          source:
+            "bom-automation",
+
+          status:
+            "success",
+        }
       );
 
-
       return res.json({
-        ok: true,
+
+        ok:
+          true,
 
         code:
           normalisedCode,
@@ -3365,29 +3950,33 @@ app.post(
       });
 
     } catch (err) {
+
       console.error(
         "Resolve error:",
         err
       );
-
 
       const store =
         getStore(
           req.body?.store
         );
 
-
       logEvent(
         store,
         "error",
-        `Resolve endpoint crashed: ${err.message}`
+        `Resolve endpoint failed: ${err.message}`,
+        {
+          status:
+            "failed",
+        }
       );
-
 
       return res.status(
         500
       ).json({
-        ok: false,
+
+        ok:
+          false,
 
         error:
           err.message,
@@ -3396,36 +3985,60 @@ app.post(
   }
 );
 
-
 // ==================================================
 // START STORE AUTOMATION
+// ==================================================
+//
+// IMPORTANT:
+//
+// This function is ONLY called by:
+// POST /api/run-now
+//
+// It is NEVER called during server startup.
+//
+// Dashboard:
+//     ↓
+// /api/run-now
+//     ↓
+// run-presale-automation.js
+//     ↓
+// correct store flow
+//
 // ==================================================
 
 function startStoreAutomation(
   store
 ) {
-  const scriptPath =
-    store.automationScript;
 
-
-  // ----------------------------------------------
-  // VERIFY SCRIPT
-  // ----------------------------------------------
+  const orchestratorPath =
+    path.join(
+      ROOT_DIR,
+      "run-presale-automation.js"
+    );
 
   if (
     !fileExists(
-      scriptPath
+      orchestratorPath
     )
   ) {
+
     logEvent(
       store,
       "error",
-      `Automation script not found: ${scriptPath}`
+      `Master orchestrator not found`,
+      {
+        status:
+          "failed",
+
+        path:
+          orchestratorPath,
+      }
     );
 
-
     return {
-      ok: false,
+
+      ok:
+        false,
 
       store:
         store.key,
@@ -3434,39 +4047,108 @@ function startStoreAutomation(
         store.name,
 
       error:
-        `${store.shortName} automation script not found: ${scriptPath}`,
+        `${store.shortName} master orchestrator not found: ${orchestratorPath}`,
     };
   }
 
+  const nodeCommand =
+    process.execPath;
 
-  // ----------------------------------------------
-  // LOG PATH
-  // ----------------------------------------------
+  const storeKey =
+    String(
+      store.key
+    )
+      .trim()
+      .toLowerCase();
 
-  logEvent(
-    store,
-    "info",
-    `Starting ${store.shortName} automation`
-  );
+  const commandText =
+    `${path.basename(
+      nodeCommand
+    )} ${path.relative(
+      ROOT_DIR,
+      orchestratorPath
+    )} ${storeKey}`;
 
+  // ==================================================
+  // DEBUG LOG
+  // ==================================================
 
-  logEvent(
-    store,
-    "info",
-    `Automation script path = ${scriptPath}`
-  );
+  const debugLogFile =
+    createDebugLogFile(
+      store
+    );
 
-
-  // ----------------------------------------------
-  // SPAWN
-  // ----------------------------------------------
+  let debugStream;
 
   try {
-    const child =
+
+    debugStream =
+      fs.createWriteStream(
+        debugLogFile,
+        {
+          flags:
+            "a",
+          encoding:
+            "utf8",
+        }
+      );
+
+  } catch (err) {
+
+    debugStream =
+      null;
+
+    logEvent(
+      store,
+      "warning",
+      `Could not create debug log: ${err.message}`
+    );
+  }
+
+  // ==================================================
+  // DASHBOARD LOG
+  // ==================================================
+
+  logEvent(
+    store,
+    "automation_start",
+    `${store.shortName} presale automation started`,
+    {
+      status:
+        "running",
+
+      command:
+        `node run-presale-automation.js ${storeKey}`,
+    }
+  );
+
+  logEvent(
+    store,
+    "info",
+    `${store.shortName} automation output is being stored in debug log`,
+    {
+      debugLog:
+        path.relative(
+          ROOT_DIR,
+          debugLogFile
+        ),
+    }
+  );
+
+  // ==================================================
+  // START ORCHESTRATOR
+  // ==================================================
+
+  let child;
+
+  try {
+
+    child =
       spawn(
-        process.execPath,
+        nodeCommand,
         [
-          scriptPath,
+          orchestratorPath,
+          storeKey,
         ],
         {
           cwd:
@@ -3475,8 +4157,11 @@ function startStoreAutomation(
           detached:
             true,
 
-          stdio:
+          stdio: [
             "ignore",
+            "pipe",
+            "pipe",
+          ],
 
           windowsHide:
             true,
@@ -3487,48 +4172,29 @@ function startStoreAutomation(
         }
       );
 
-
-    child.unref();
-
-
-    logEvent(
-      store,
-      "info",
-      `Manual ${path.basename(
-        scriptPath
-      )} run triggered from dashboard`
-    );
-
-
-    return {
-      ok: true,
-
-      store:
-        store.key,
-
-      storeName:
-        store.name,
-
-      pid:
-        child.pid,
-
-      script:
-        path.relative(
-          ROOT_DIR,
-          scriptPath
-        ),
-    };
-
   } catch (err) {
+
+    if (debugStream) {
+      debugStream.end();
+    }
+
     logEvent(
       store,
       "error",
-      `Could not start ${store.shortName} automation: ${err.message}`
+      `${store.shortName} automation could not be started`,
+      {
+        status:
+          "failed",
+
+        error:
+          err.message,
+      }
     );
 
-
     return {
-      ok: false,
+
+      ok:
+        false,
 
       store:
         store.key,
@@ -3540,11 +4206,210 @@ function startStoreAutomation(
         err.message,
     };
   }
-}
 
+  // ==================================================
+  // DEBUG STDOUT
+  // ==================================================
+
+  child.stdout.on(
+    "data",
+    (data) => {
+
+      const text =
+        data.toString();
+
+      writeDebugLog(
+        debugStream,
+        text
+      );
+    }
+  );
+
+  // ==================================================
+  // DEBUG STDERR
+  // ==================================================
+
+  child.stderr.on(
+    "data",
+    (data) => {
+
+      const text =
+        data.toString();
+
+      writeDebugLog(
+        debugStream,
+        text
+      );
+    }
+  );
+
+  // ==================================================
+  // PROCESS ERROR
+  // ==================================================
+
+  child.on(
+    "error",
+    (err) => {
+
+      logEvent(
+        store,
+        "error",
+        `${store.shortName} automation process error`,
+        {
+          status:
+            "failed",
+
+          error:
+            err.message,
+        }
+      );
+
+      writeDebugLog(
+        debugStream,
+        `\n[PROCESS ERROR] ${err.stack || err.message}\n`
+      );
+    }
+  );
+
+  // ==================================================
+  // PROCESS EXIT
+  // ==================================================
+
+  child.on(
+    "exit",
+    (
+      code,
+      signal
+    ) => {
+
+      const success =
+        code === 0;
+
+      if (success) {
+
+        logEvent(
+          store,
+          "automation_complete",
+          `${store.shortName} presale automation completed`,
+          {
+            status:
+              "success",
+
+            exitCode:
+              0,
+          }
+        );
+
+      } else {
+
+        logEvent(
+          store,
+          "automation_complete",
+          `${store.shortName} presale automation finished with errors`,
+          {
+            status:
+              "failed",
+
+            exitCode:
+              code,
+
+            signal:
+              signal ||
+              null,
+          }
+        );
+      }
+
+      writeDebugLog(
+        debugStream,
+        `\n==================================================\n`
+      );
+
+      writeDebugLog(
+        debugStream,
+        `[PROCESS EXIT] code=${code} signal=${signal || "none"}\n`
+      );
+
+      writeDebugLog(
+        debugStream,
+        `==================================================\n`
+      );
+
+      if (debugStream) {
+        debugStream.end();
+      }
+    }
+  );
+
+  // ==================================================
+  // DETACH
+  // ==================================================
+
+  child.unref();
+
+  // ==================================================
+  // STARTED
+  // ==================================================
+
+  logEvent(
+    store,
+    "automation_triggered",
+    `${store.shortName} automation triggered from dashboard`,
+    {
+      status:
+        "running",
+
+      pid:
+        child.pid,
+
+      command:
+        `node run-presale-automation.js ${storeKey}`,
+    }
+  );
+
+  return {
+
+    ok:
+      true,
+
+    store:
+      store.key,
+
+    storeName:
+      store.name,
+
+    pid:
+      child.pid,
+
+    command:
+      `node run-presale-automation.js ${storeKey}`,
+
+    logFile:
+      path.relative(
+        ROOT_DIR,
+        store.logFile
+      ),
+
+    debugLog:
+      path.relative(
+        ROOT_DIR,
+        debugLogFile
+      ),
+  };
+}
 
 // ==================================================
 // API — RUN NOW
+// ==================================================
+//
+// IMPORTANT:
+//
+// This is the ONLY place where the dashboard
+// starts presale automation.
+//
+// Nothing below or above automatically calls
+// the orchestrator during dashboard startup.
+//
 // ==================================================
 
 app.post(
@@ -3553,7 +4418,9 @@ app.post(
     req,
     res
   ) => {
+
     try {
+
       const requestedStore =
         String(
           req.query.store ||
@@ -3563,7 +4430,6 @@ app.post(
           .trim()
           .toLowerCase();
 
-
       // ==================================================
       // ALL STORES
       // ==================================================
@@ -3572,72 +4438,322 @@ app.post(
         requestedStore ===
         "all"
       ) {
-        const results =
-          [];
 
-        for (
-          const store of getAllStores()
-        ) {
-          const result =
-            startStoreAutomation(
-              store
-            );
-
-          results.push(
-            result
+        const orchestratorPath =
+          path.join(
+            ROOT_DIR,
+            "run-presale-automation.js"
           );
-        }
-
-
-        const failed =
-          results.filter(
-            (result) =>
-              !result.ok
-          );
-
-
-        logEvent(
-          STORES.akl,
-          "info",
-          "Manual ALL STORES automation run triggered from dashboard"
-        );
-
 
         if (
-          failed.length ===
-          results.length
+          !fileExists(
+            orchestratorPath
+          )
         ) {
+
+          logEvent(
+            STORES.akl,
+            "error",
+            "Master orchestrator not found",
+            {
+              status:
+                "failed",
+
+              path:
+                orchestratorPath,
+            }
+          );
+
           return res.status(
             500
           ).json({
-            ok: false,
+
+            ok:
+              false,
 
             store:
               "all",
 
-            results,
-
             error:
-              "Could not start any store automation.",
+              `Master orchestrator not found: ${orchestratorPath}`,
           });
         }
 
+        // ----------------------------------------------
+        // CREATE DEBUG LOG
+        // ----------------------------------------------
+
+        const timestamp =
+          new Date()
+            .toISOString()
+            .replace(
+              /[:.]/g,
+              "-"
+            );
+
+        const allDebugDirectory =
+          path.join(
+            DEBUG_LOG_DIR,
+            "ALL"
+          );
+
+        if (
+          !fs.existsSync(
+            allDebugDirectory
+          )
+        ) {
+
+          fs.mkdirSync(
+            allDebugDirectory,
+            {
+              recursive:
+                true,
+            }
+          );
+        }
+
+        const debugLogFile =
+          path.join(
+            allDebugDirectory,
+            `${timestamp}.log`
+          );
+
+        let debugStream;
+
+        try {
+
+          debugStream =
+            fs.createWriteStream(
+              debugLogFile,
+              {
+                flags:
+                  "a",
+                encoding:
+                  "utf8",
+              }
+            );
+
+        } catch {
+
+          debugStream =
+            null;
+        }
+
+        // ----------------------------------------------
+        // LOG START
+        // ----------------------------------------------
+
+        logEvent(
+          STORES.akl,
+          "automation_start",
+          "ALL STORES presale automation started",
+          {
+            status:
+              "running",
+
+            command:
+              "node run-presale-automation.js",
+          }
+        );
+
+        let child;
+
+        try {
+
+          child =
+            spawn(
+              process.execPath,
+              [
+                orchestratorPath,
+              ],
+              {
+                cwd:
+                  ROOT_DIR,
+
+                detached:
+                  true,
+
+                stdio: [
+                  "ignore",
+                  "pipe",
+                  "pipe",
+                ],
+
+                windowsHide:
+                  true,
+
+                env: {
+                  ...process.env,
+                },
+              }
+            );
+
+        } catch (err) {
+
+          if (debugStream) {
+            debugStream.end();
+          }
+
+          logEvent(
+            STORES.akl,
+            "error",
+            `Could not start ALL STORES automation: ${err.message}`,
+            {
+              status:
+                "failed",
+            }
+          );
+
+          return res.status(
+            500
+          ).json({
+
+            ok:
+              false,
+
+            store:
+              "all",
+
+            error:
+              err.message,
+          });
+        }
+
+        child.stdout.on(
+          "data",
+          (data) => {
+
+            writeDebugLog(
+              debugStream,
+              data.toString()
+            );
+          }
+        );
+
+        child.stderr.on(
+          "data",
+          (data) => {
+
+            writeDebugLog(
+              debugStream,
+              data.toString()
+            );
+          }
+        );
+
+        child.on(
+          "error",
+          (err) => {
+
+            logEvent(
+              STORES.akl,
+              "error",
+              `ALL STORES automation process error: ${err.message}`,
+              {
+                status:
+                  "failed",
+              }
+            );
+
+            writeDebugLog(
+              debugStream,
+              `\n[PROCESS ERROR] ${err.stack || err.message}\n`
+            );
+          }
+        );
+
+        child.on(
+          "exit",
+          (
+            code,
+            signal
+          ) => {
+
+            if (
+              code === 0
+            ) {
+
+              logEvent(
+                STORES.akl,
+                "automation_complete",
+                "ALL STORES presale automation completed",
+                {
+                  status:
+                    "success",
+
+                  exitCode:
+                    0,
+                }
+              );
+
+            } else {
+
+              logEvent(
+                STORES.akl,
+                "automation_complete",
+                "ALL STORES presale automation finished with errors",
+                {
+                  status:
+                    "failed",
+
+                  exitCode:
+                    code,
+
+                  signal:
+                    signal ||
+                    null,
+                }
+              );
+            }
+
+            if (debugStream) {
+              debugStream.end();
+            }
+          }
+        );
+
+        child.unref();
+
+        logEvent(
+          STORES.akl,
+          "automation_triggered",
+          "ALL STORES automation triggered from dashboard",
+          {
+            status:
+              "running",
+
+            pid:
+              child.pid,
+
+            command:
+              "node run-presale-automation.js",
+
+            debugLog:
+              path.relative(
+                ROOT_DIR,
+                debugLogFile
+              ),
+          }
+        );
 
         return res.json({
-          ok: true,
+
+          ok:
+            true,
 
           store:
             "all",
 
-          results,
+          pid:
+            child.pid,
+
+          command:
+            "node run-presale-automation.js",
 
           message:
-            failed.length > 0
-              ? "Some store automations failed to start."
-              : "AKL, WLG and CHCH automation started successfully.",
+            "AKL, WLG and CHCH presale automation started successfully.",
         });
       }
-
 
       // ==================================================
       // SINGLE STORE
@@ -3648,16 +4764,36 @@ app.post(
           requestedStore
         );
 
+      if (!store) {
+
+        return res.status(
+          400
+        ).json({
+
+          ok:
+            false,
+
+          store:
+            requestedStore,
+
+          error:
+            `Unknown store: ${requestedStore}`,
+        });
+      }
+
+      // ----------------------------------------------
+      // START ONLY WHEN THIS API IS CALLED
+      // ----------------------------------------------
 
       const result =
         startStoreAutomation(
           store
         );
 
-
       if (
         !result.ok
       ) {
+
         return res.status(
           500
         ).json(
@@ -3665,9 +4801,10 @@ app.post(
         );
       }
 
-
       return res.json({
-        ok: true,
+
+        ok:
+          true,
 
         store:
           store.key,
@@ -3678,24 +4815,26 @@ app.post(
         pid:
           result.pid,
 
-        script:
-          result.script,
+        command:
+          result.command,
 
         message:
-          `${store.shortName} automation started successfully.`,
+          `${store.shortName} presale automation started successfully.`,
       });
 
     } catch (err) {
+
       console.error(
         "Run-now error:",
         err
       );
 
-
       return res.status(
         500
       ).json({
-        ok: false,
+
+        ok:
+          false,
 
         error:
           err.message,
@@ -3703,7 +4842,6 @@ app.post(
     }
   }
 );
-
 
 // ==================================================
 // API — STORE CONFIGURATION
@@ -3715,9 +4853,11 @@ app.get(
     req,
     res
   ) => {
+
     res.json(
       getAllStores().map(
         (store) => ({
+
           key:
             store.key,
 
@@ -3740,7 +4880,6 @@ app.get(
               ? `${store.shopifyMetafieldNamespace}.${store.shopifyMetafieldKey}`
               : null,
 
-
           automationScript:
             path.relative(
               ROOT_DIR,
@@ -3752,7 +4891,6 @@ app.get(
               store.automationScript
             ),
 
-
           resolveScript:
             path.relative(
               ROOT_DIR,
@@ -3763,7 +4901,6 @@ app.get(
             fileExists(
               store.resolveScript
             ),
-
 
           cleanupScript:
             store.cleanupScript
@@ -3780,7 +4917,6 @@ app.get(
                 )
               : false,
 
-
           deliveryScript:
             store.deliveryScript
               ? path.relative(
@@ -3795,7 +4931,6 @@ app.get(
                   store.deliveryScript
                 )
               : false,
-
 
           shopifyListingScript:
             store.shopifyListingScript
@@ -3812,7 +4947,6 @@ app.get(
                 )
               : false,
 
-
           stateFile:
             path.relative(
               ROOT_DIR,
@@ -3823,7 +4957,6 @@ app.get(
             fileExists(
               store.stateFile
             ),
-
 
           graduationFile:
             path.relative(
@@ -3841,7 +4974,6 @@ app.get(
   }
 );
 
-
 // ==================================================
 // API — PATH DIAGNOSTICS
 // ==================================================
@@ -3852,11 +4984,12 @@ app.get(
     req,
     res
   ) => {
-    const stores =
-      {};
+
+    const stores = {};
 
     getAllStores().forEach(
       (store) => {
+
         stores[
           store.key
         ] = {
@@ -3869,7 +5002,6 @@ app.get(
               store.automationScript
             ),
 
-
           resolveScript:
             store.resolveScript,
 
@@ -3877,7 +5009,6 @@ app.get(
             fileExists(
               store.resolveScript
             ),
-
 
           cleanupScript:
             store.cleanupScript,
@@ -3889,7 +5020,6 @@ app.get(
                 )
               : false,
 
-
           deliveryScript:
             store.deliveryScript,
 
@@ -3899,7 +5029,6 @@ app.get(
                   store.deliveryScript
                 )
               : false,
-
 
           shopifyListingScript:
             store.shopifyListingScript,
@@ -3911,7 +5040,6 @@ app.get(
                 )
               : false,
 
-
           stateFile:
             store.stateFile,
 
@@ -3919,7 +5047,6 @@ app.get(
             fileExists(
               store.stateFile
             ),
-
 
           graduationFile:
             store.graduationFile,
@@ -3929,7 +5056,6 @@ app.get(
               store.graduationFile
             ),
 
-
           logFile:
             store.logFile,
 
@@ -3938,15 +5064,14 @@ app.get(
               store.logFile
             ),
 
-
           shopifyEnabled:
             store.shopifyEnabled,
         };
       }
     );
 
-
     res.json({
+
       rootDir:
         ROOT_DIR,
 
@@ -3970,6 +5095,14 @@ app.get(
       jsonDir:
         JSON_DIR,
 
+      debugLogDir:
+        DEBUG_LOG_DIR,
+
+      debugLogDirExists:
+        fileExists(
+          DEBUG_LOG_DIR
+        ),
+
       stores,
 
       generatedAt:
@@ -3977,7 +5110,6 @@ app.get(
     });
   }
 );
-
 
 // ==================================================
 // API — HEALTH
@@ -3989,8 +5121,11 @@ app.get(
     req,
     res
   ) => {
+
     res.json({
-      ok: true,
+
+      ok:
+        true,
 
       service:
         "TSB Pre-sale Automation Dashboard",
@@ -4004,12 +5139,14 @@ app.get(
             store.shortName
         ),
 
+      automationOnStartup:
+        false,
+
       timestamp:
         new Date().toISOString(),
     });
   }
 );
-
 
 // ==================================================
 // ROOT
@@ -4021,18 +5158,19 @@ app.get(
     req,
     res
   ) => {
+
     const indexPath =
       path.join(
         DASHBOARD_DIR,
         "index.html"
       );
 
-
     if (
       !fileExists(
         indexPath
       )
     ) {
+
       return res.status(
         500
       ).send(
@@ -4044,13 +5182,11 @@ app.get(
       );
     }
 
-
     res.sendFile(
       indexPath
     );
   }
 );
-
 
 // ==================================================
 // 404 API HANDLER
@@ -4062,9 +5198,11 @@ app.use(
     req,
     res
   ) => {
+
     res.status(
       404
     ).json({
+
       error:
         "API endpoint not found",
 
@@ -4073,7 +5211,6 @@ app.use(
     });
   }
 );
-
 
 // ==================================================
 // GLOBAL ERROR HANDLER
@@ -4086,25 +5223,27 @@ app.use(
     res,
     next
   ) => {
+
     console.error(
       "Unhandled dashboard error:",
       err
     );
 
-
     if (
       res.headersSent
     ) {
+
       return next(
         err
       );
     }
 
-
     res.status(
       500
     ).json({
-      ok: false,
+
+      ok:
+        false,
 
       error:
         err.message ||
@@ -4113,170 +5252,329 @@ app.use(
   }
 );
 
-
 // ==================================================
 // START SERVER
 // ==================================================
+//
+// IMPORTANT:
+//
+// NOTHING HERE STARTS AUTOMATION.
+//
+// This section ONLY starts the Express server.
+//
+// Automation can only begin after:
+//
+// POST /api/run-now
+//
+// ==================================================
 
-const server = app.listen(
-  PORT,
-  () => {
-    console.log("");
-    console.log("==============================================");
-    console.log(" TSB PRE-SALE DASHBOARD");
-    console.log("==============================================");
-    console.log(` Dashboard: http://localhost:${PORT}/`);
-    console.log(` API:       http://localhost:${PORT}/api/overview`);
-    console.log("");
+const server =
+  app.listen(
+    PORT,
+    () => {
 
-    console.log(" ROOT");
-    console.log(` ${ROOT_DIR}`);
-    console.log("");
-
-    console.log(" STORES");
-    console.log(" --------------------------------------------");
-
-    getAllStores().forEach((store) => {
-      console.log(` ${store.shortName} → ${store.name}`);
+      console.log("");
 
       console.log(
-        `    Automation: ${store.automationScript}`
+        "=============================================="
       );
 
       console.log(
-        `    Exists:     ${fileExists(
-          store.automationScript
-        )}`
-      );
-
-      if (store.resolveScript) {
-        console.log(
-          `    Resolve:    ${store.resolveScript}`
-        );
-
-        console.log(
-          `    Exists:     ${fileExists(
-            store.resolveScript
-          )}`
-        );
-      }
-
-      if (store.cleanupScript) {
-        console.log(
-          `    Cleanup:    ${store.cleanupScript}`
-        );
-
-        console.log(
-          `    Exists:     ${fileExists(
-            store.cleanupScript
-          )}`
-        );
-      }
-
-      if (store.deliveryScript) {
-        console.log(
-          `    Delivery:   ${store.deliveryScript}`
-        );
-
-        console.log(
-          `    Exists:     ${fileExists(
-            store.deliveryScript
-          )}`
-        );
-      }
-
-      if (store.shopifyListingScript) {
-        console.log(
-          `    Shopify:    ${store.shopifyListingScript}`
-        );
-
-        console.log(
-          `    Exists:     ${fileExists(
-            store.shopifyListingScript
-          )}`
-        );
-      }
-
-      console.log(
-        `    State:      ${store.stateFile}`
+        " TSB PRE-SALE DASHBOARD"
       );
 
       console.log(
-        `    Exists:     ${fileExists(
-          store.stateFile
-        )}`
+        "=============================================="
+      );
+
+      console.log(
+        ` Dashboard: http://localhost:${PORT}/`
+      );
+
+      console.log(
+        ` API:       http://localhost:${PORT}/api/overview`
       );
 
       console.log("");
-    });
 
-    console.log(
-      " --------------------------------------------"
-    );
+      console.log(
+        " ROOT"
+      );
 
-    console.log(
-      "=============================================="
-    );
+      console.log(
+        ` ${ROOT_DIR}`
+      );
 
-    console.log("");
+      console.log("");
 
-    console.log(
-      "✓ Dashboard server is running."
-    );
+      console.log(
+        " STORES"
+      );
 
-    console.log(
-      "✓ Waiting for requests..."
-    );
+      console.log(
+        " --------------------------------------------"
+      );
 
-    console.log("");
-  }
-);
+      getAllStores().forEach(
+        (store) => {
 
+          console.log(
+            ` ${store.shortName} → ${store.name}`
+          );
+
+          console.log(
+            `    Automation: ${store.automationScript}`
+          );
+
+          console.log(
+            `    Exists:     ${fileExists(
+              store.automationScript
+            )}`
+          );
+
+          if (
+            store.resolveScript
+          ) {
+
+            console.log(
+              `    Resolve:    ${store.resolveScript}`
+            );
+
+            console.log(
+              `    Exists:     ${fileExists(
+                store.resolveScript
+              )}`
+            );
+          }
+
+          if (
+            store.cleanupScript
+          ) {
+
+            console.log(
+              `    Cleanup:    ${store.cleanupScript}`
+            );
+
+            console.log(
+              `    Exists:     ${fileExists(
+                store.cleanupScript
+              )}`
+            );
+          }
+
+          if (
+            store.deliveryScript
+          ) {
+
+            console.log(
+              `    Delivery:   ${store.deliveryScript}`
+            );
+
+            console.log(
+              `    Exists:     ${fileExists(
+                store.deliveryScript
+              )}`
+            );
+          }
+
+          if (
+            store.shopifyListingScript
+          ) {
+
+            console.log(
+              `    Shopify:    ${store.shopifyListingScript}`
+            );
+
+            console.log(
+              `    Exists:     ${fileExists(
+                store.shopifyListingScript
+              )}`
+            );
+          }
+
+          console.log(
+            `    State:      ${store.stateFile}`
+          );
+
+          console.log(
+            `    Exists:     ${fileExists(
+              store.stateFile
+            )}`
+          );
+
+          console.log("");
+        }
+      );
+
+      console.log(
+        " --------------------------------------------"
+      );
+
+      console.log(
+        " AUTOMATION"
+      );
+
+      console.log(
+        " --------------------------------------------"
+      );
+
+      console.log(
+        " ✓ No automation runs at dashboard startup."
+      );
+
+      console.log(
+        " ✓ Automation runs only through /api/run-now."
+      );
+
+      console.log(
+        " ✓ AKL → run-presale-automation.js akl"
+      );
+
+      console.log(
+        " ✓ WLG → run-presale-automation.js wlg"
+      );
+
+      console.log(
+        " ✓ CHCH → run-presale-automation.js chch"
+      );
+
+      console.log(
+        " ✓ ALL → run-presale-automation.js"
+      );
+
+      console.log("");
+
+      console.log(
+        " LOGGING"
+      );
+
+      console.log(
+        " --------------------------------------------"
+      );
+
+      console.log(
+        ` Main logs:  ${AUTOMATION_LOG}`
+      );
+
+      console.log(
+        ` Debug logs: ${DEBUG_LOG_DIR}`
+      );
+
+      console.log("");
+
+      console.log(
+        "=============================================="
+      );
+
+      console.log("");
+
+      console.log(
+        "✓ Dashboard server is running."
+      );
+
+      console.log(
+        "✓ Waiting for requests..."
+      );
+
+      console.log("");
+    }
+  );
 
 // ==================================================
 // SERVER ERROR HANDLER
 // ==================================================
 
-server.on("error", (err) => {
-  console.error("");
-  console.error("==============================================");
-  console.error(" DASHBOARD SERVER ERROR");
-  console.error("==============================================");
-  console.error(err);
-  console.error("");
+server.on(
+  "error",
+  (err) => {
 
-  if (err.code === "EADDRINUSE") {
+    console.error("");
+
     console.error(
-      `Port ${PORT} is already being used by another process.`
+      "=============================================="
     );
+
+    console.error(
+      " DASHBOARD SERVER ERROR"
+    );
+
+    console.error(
+      "=============================================="
+    );
+
+    console.error(
+      err
+    );
+
+    console.error("");
+
+    if (
+      err.code ===
+      "EADDRINUSE"
+    ) {
+
+      console.error(
+        `Port ${PORT} is already being used by another process.`
+      );
+    }
+
+    process.exitCode =
+      1;
   }
-
-  process.exitCode = 1;
-});
-
+);
 
 // ==================================================
 // PROCESS DEBUG
 // ==================================================
 
-process.on("exit", (code) => {
-  console.log(
-    `\n[PROCESS EXIT] dashboard-server.js exited with code ${code}`
-  );
-});
+process.on(
+  "exit",
+  (code) => {
 
-process.on("SIGINT", () => {
-  console.log("\n[PROCESS] SIGINT received.");
-  server.close(() => {
-    console.log("[PROCESS] Dashboard server closed.");
-    process.exit(0);
-  });
-});
+    console.log(
+      `\n[PROCESS EXIT] dashboard-server.js exited with code ${code}`
+    );
+  }
+);
 
-process.on("SIGTERM", () => {
-  console.log("\n[PROCESS] SIGTERM received.");
-  server.close(() => {
-    console.log("[PROCESS] Dashboard server closed.");
-    process.exit(0);
-  });
-});
+process.on(
+  "SIGINT",
+  () => {
+
+    console.log(
+      "\n[PROCESS] SIGINT received."
+    );
+
+    server.close(
+      () => {
+
+        console.log(
+          "[PROCESS] Dashboard server closed."
+        );
+
+        process.exit(0);
+      }
+    );
+  }
+);
+
+process.on(
+  "SIGTERM",
+  () => {
+
+    console.log(
+      "\n[PROCESS] SIGTERM received."
+    );
+
+    server.close(
+      () => {
+
+        console.log(
+          "[PROCESS] Dashboard server closed."
+        );
+
+        process.exit(0);
+      }
+    );
+  }
+);
