@@ -15,6 +15,7 @@
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
+    "express-session": "^1.19.0",
     "json-bigint": "^1.0.0",
     "oauth-1.0a": "^2.2.6",
     "playwright": "^1.62.1"
