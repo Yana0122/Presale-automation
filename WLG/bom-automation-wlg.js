@@ -14,7 +14,7 @@ const LOG_FILE = "./automation.log";
 // STOCK CONTROL
 // --------------------------------------------------
 
-const PRESALE_QTY = 5;
+const PRESALE_QTY = 20;
 
 // Maximum real warehouse stock allowed for presale.
 // If real stock is ABOVE this number, presale is stopped.

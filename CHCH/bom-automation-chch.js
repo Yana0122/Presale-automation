@@ -48,7 +48,7 @@ const token = {
 
 const { getOrAssignWarehouse } = require("../AKL/warehouse-assignment");
 
-const PRESALE_QTY = 5;
+const PRESALE_QTY = 20;
 
 // --------------------------------------------------
 // CHCH STATE FILE
