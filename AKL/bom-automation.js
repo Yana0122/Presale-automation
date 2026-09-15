@@ -302,7 +302,7 @@ console.log(
 );
 
   // ---- SAFETY RESTRICTION: live account first test — only this PO ----
-  const ALLOWED_PO_NUMBERS = ["PO4447"];
+  const ALLOWED_PO_NUMBERS = ["PO4503"];
   const pos = eligiblePos.filter((po) => ALLOWED_PO_NUMBERS.includes(po.OrderNumber));
 
   console.log(`Found ${allPos.length} total Awaiting Receipt PO(s) on this account.`);
