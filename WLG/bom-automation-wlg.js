@@ -10,6 +10,19 @@ const JSONbig = require("json-bigint")({
 
 const LOG_FILE = "./automation.log";
 
+// --------------------------------------------------
+// STOCK CONTROL
+// --------------------------------------------------
+
+const PRESALE_QTY = 5;
+
+// Maximum real warehouse stock allowed for presale.
+// If real stock is ABOVE this number, presale is stopped.
+const REAL_STOCK_LIMIT = 20;
+
+// After this many days, real warehouse stock is checked again.
+const STOCK_RECHECK_DAYS = 7;
+
 function log(type, msg) {
   const entry = {
     time: new Date().toISOString(),
@@ -46,8 +59,6 @@ const token = {
 
 const { getOrAssignWarehouse } = require("../AKL/warehouse-assignment");
 
-const PRESALE_QTY = 5;
-
 const STATE_FILE = path.join(
   __dirname,
   "..",
@@ -64,8 +75,6 @@ const EXCLUDED_SUPPLIERS = ["Parmco Ltd"];
 
 const AUTOMATION_PO_CUTOFF_DATE = "2026-09-07";
 
-// PO must have a valid CreatedDate and must be
-// created on or after the cutoff date.
 function isPOEligible(po) {
   const createdDate = po.CreatedDate;
 
@@ -102,8 +111,11 @@ function isPOEligible(po) {
   return true;
 }
 
-// Safety restriction while testing
-const ALLOWED_PO_NUMBERS = ["PO1560"];
+// --------------------------------------------------
+// SAFETY RESTRICTION WHILE TESTING
+// --------------------------------------------------
+
+// const ALLOWED_PO_NUMBERS = ["PO1560"];
 
 // --------------------------------------------------
 // STATE
@@ -150,9 +162,10 @@ function makeStateKey(type, poNumber, productCode) {
 // title:PO1560:PR13374
 // bom:PO1560:PR13374
 // blocked:PO1560:PR13374
+// stockcheck:PO1560:PR13374-A
 //
-// This is critical because the same product can return
-// on a future PO and must be allowed to enter presale again.
+// The stockcheck key is also PO/product specific so the
+// same product can enter presale again on a future PO.
 
 // --------------------------------------------------
 // HELPERS
@@ -333,6 +346,305 @@ async function apiPost(url, body) {
       raw: text,
     };
   }
+}
+
+// --------------------------------------------------
+// REAL WAREHOUSE STOCK
+// --------------------------------------------------
+
+async function getRealWarehouseStock(
+  productCode,
+  warehouseCode
+) {
+  if (!warehouseCode) {
+    log(
+      "error",
+      `${productCode}: No warehouse code available — cannot safely check real stock`
+    );
+
+    return null;
+  }
+
+  const url =
+    `https://api.tradevine.com/v1/Product?code=${encodeURIComponent(
+      productCode
+    )}&pageSize=10`;
+
+  const { data } = await apiGet(url);
+
+  const list =
+    data.List || data;
+
+  const product =
+    list.find(
+      (p) => p.Code === productCode
+    ) || null;
+
+  if (!product) {
+    log(
+      "error",
+      `${productCode}: Could not retrieve product while checking warehouse stock`
+    );
+
+    return null;
+  }
+
+  const warehouses =
+    product.PerWarehouseInventory || [];
+
+  const warehouse =
+    warehouses.find(
+      (w) =>
+        String(w.WarehouseCode || "")
+          .trim()
+          .toUpperCase() ===
+        String(warehouseCode || "")
+          .trim()
+          .toUpperCase()
+    );
+
+  if (!warehouse) {
+    log(
+      "warn",
+      `${productCode}: Warehouse ${warehouseCode} not found in PerWarehouseInventory`
+    );
+
+    return 0;
+  }
+
+  const stock = Number(
+    warehouse.QuantityInStockSnapshot ?? 0
+  );
+
+  if (Number.isNaN(stock)) {
+    log(
+      "error",
+      `${productCode}: Invalid warehouse stock returned for ${warehouseCode}`
+    );
+
+    return null;
+  }
+
+  return stock;
+}
+
+// --------------------------------------------------
+// STOCK CHECK
+// --------------------------------------------------
+
+function daysSince(dateString) {
+  if (!dateString) {
+    return Infinity;
+  }
+
+  const date = new Date(dateString);
+
+  if (Number.isNaN(date.getTime())) {
+    return Infinity;
+  }
+
+  const diff =
+    Date.now() - date.getTime();
+
+  return diff / (
+    1000 *
+    60 *
+    60 *
+    24
+  );
+}
+
+// --------------------------------------------------
+// CHECK WHETHER REAL STOCK ALLOWS PRESALE
+// --------------------------------------------------
+
+async function canContinuePresale(
+  product,
+  state,
+  poNumber,
+  supplierName,
+  warehouseCode
+) {
+  const stockKey = makeStateKey(
+    "stockcheck",
+    poNumber,
+    product.Code
+  );
+
+  const existingCheck =
+    state[stockKey];
+
+  // ------------------------------------------------
+  // FIRST CHECK
+  // ------------------------------------------------
+
+  if (!existingCheck) {
+    console.log(
+      `    ${product.Code}: Checking real ${warehouseCode} warehouse stock...`
+    );
+
+    const realStock =
+      await getRealWarehouseStock(
+        product.Code,
+        warehouseCode
+      );
+
+    if (realStock === null) {
+      console.log(
+        `    ${product.Code}: REAL STOCK CHECK FAILED — skipping presale for safety`
+      );
+
+      return false;
+    }
+
+    state[stockKey] = {
+      productCode: product.Code,
+      poNumber,
+      supplier: supplierName || null,
+      warehouseCode,
+      realStock,
+      checkedAt:
+        new Date().toISOString(),
+      status:
+        realStock > REAL_STOCK_LIMIT
+          ? "STOPPED_HIGH_REAL_STOCK"
+          : "PRESALE_ALLOWED",
+    };
+
+    saveState(state);
+
+    if (realStock > REAL_STOCK_LIMIT) {
+      console.log(
+        `    ${product.Code}: REAL STOCK ${realStock} > ${REAL_STOCK_LIMIT} — STOPPING PRESALE`
+      );
+
+      log(
+        "warn",
+        `${product.Code} + ${poNumber}: real ${warehouseCode} stock is ${realStock}, above limit ${REAL_STOCK_LIMIT} — presale stopped`
+      );
+
+      return false;
+    }
+
+    console.log(
+      `    ${product.Code}: REAL STOCK ${realStock} <= ${REAL_STOCK_LIMIT} — presale allowed`
+    );
+
+    return true;
+  }
+
+  // ------------------------------------------------
+  // 7-DAY RECHECK
+  // ------------------------------------------------
+
+  const elapsedDays =
+    daysSince(
+      existingCheck.checkedAt
+    );
+
+  if (
+    elapsedDays >=
+    STOCK_RECHECK_DAYS
+  ) {
+    console.log(
+      `    ${product.Code}: 7+ days since last stock check — rechecking real ${warehouseCode} stock...`
+    );
+
+    const previousStock =
+      Number(
+        existingCheck.realStock
+      );
+
+    const currentStock =
+      await getRealWarehouseStock(
+        product.Code,
+        warehouseCode
+      );
+
+    if (currentStock === null) {
+      console.log(
+        `    ${product.Code}: REAL STOCK RECHECK FAILED — skipping presale for safety`
+      );
+
+      return false;
+    }
+
+    const decreased =
+      currentStock < previousStock;
+
+    state[stockKey] = {
+      ...existingCheck,
+      previousRealStock:
+        previousStock,
+      realStock:
+        currentStock,
+      previousCheckedAt:
+        existingCheck.checkedAt,
+      checkedAt:
+        new Date().toISOString(),
+      stockDecreased:
+        decreased,
+      status:
+        currentStock > REAL_STOCK_LIMIT
+          ? "STOPPED_HIGH_REAL_STOCK"
+          : "PRESALE_ALLOWED",
+    };
+
+    saveState(state);
+
+    console.log(
+      `    ${product.Code}: previous real stock ${previousStock} → current real stock ${currentStock}`
+    );
+
+    if (decreased) {
+      log(
+        "info",
+        `${product.Code} + ${poNumber}: real warehouse stock decreased from ${previousStock} to ${currentStock}`
+      );
+    } else {
+      log(
+        "info",
+        `${product.Code} + ${poNumber}: real warehouse stock did not decrease (${previousStock} → ${currentStock})`
+      );
+    }
+
+    if (
+      currentStock > REAL_STOCK_LIMIT
+    ) {
+      console.log(
+        `    ${product.Code}: REAL STOCK ${currentStock} > ${REAL_STOCK_LIMIT} — STOPPING PRESALE`
+      );
+
+      return false;
+    }
+
+    console.log(
+      `    ${product.Code}: REAL STOCK ${currentStock} <= ${REAL_STOCK_LIMIT} — presale allowed`
+    );
+
+    return true;
+  }
+
+  // ------------------------------------------------
+  // EXISTING CHECK STILL VALID
+  // ------------------------------------------------
+
+  if (
+    Number(existingCheck.realStock) >
+    REAL_STOCK_LIMIT
+  ) {
+    console.log(
+      `    ${product.Code}: Previous real stock check was ${existingCheck.realStock} > ${REAL_STOCK_LIMIT} — presale remains stopped`
+    );
+
+    return false;
+  }
+
+  console.log(
+    `    ${product.Code}: Real stock check still valid (${existingCheck.realStock}) — presale allowed`
+  );
+
+  return true;
 }
 
 // --------------------------------------------------
@@ -576,59 +888,68 @@ async function linkChildrenToParent(
 // --------------------------------------------------
 
 async function main() {
- const state = loadState();
+  const state = loadState();
 
- const allPos =
-  await getAllAwaitingReceiptPOs();
+  const allPos =
+    await getAllAwaitingReceiptPOs();
 
-console.log(
-  `Found ${allPos.length} total Awaiting Receipt PO(s) on this account.`
-);
-
-// --------------------------------------------------
-// PO CREATION CUTOFF
-// --------------------------------------------------
-
-const eligiblePos =
-  allPos.filter(isPOEligible);
-
-console.log(
-  `PO cutoff: ${AUTOMATION_PO_CUTOFF_DATE}`
-);
-
-console.log(
-  `Eligible POs after cutoff: ${eligiblePos.length}`
-);
-
-// --------------------------------------------------
-// SAFETY RESTRICTION
-// Keep single-PO restriction for now.
-// --------------------------------------------------
-
-const pos =
-  eligiblePos.filter(
-    (po) =>
-      ALLOWED_PO_NUMBERS.includes(
-        po.OrderNumber
-      )
+  console.log(
+    `Found ${allPos.length} total Awaiting Receipt PO(s) on this account.`
   );
 
-console.log(
-  `Restricted to: ${ALLOWED_PO_NUMBERS.join(
-    ", "
-  )}`
-);
+  // --------------------------------------------------
+  // PO CREATION CUTOFF
+  // --------------------------------------------------
 
-console.log(
-  `Will process: ${
-    pos
-      .map(
-        (p) => p.OrderNumber
-      )
-      .join(", ") ||
-    "(none matched — PO may be before cutoff)"
-  }\n`
-);
+  const eligiblePos =
+    allPos.filter(isPOEligible);
+
+  console.log(
+    `PO cutoff: ${AUTOMATION_PO_CUTOFF_DATE}`
+  );
+
+  console.log(
+    `Eligible POs after cutoff: ${eligiblePos.length}`
+  );
+
+  // --------------------------------------------------
+  // PROCESS ALL ELIGIBLE POs
+  // --------------------------------------------------
+  //
+  // No single-PO restriction.
+  // Every Awaiting Receipt PO created on or after
+  // the cutoff date will be processed.
+  //
+  // Additional safety checks still apply:
+  // - Excluded suppliers
+  // - NZ MADE products
+  // - Real stock > 20
+  // - Failed/unknown real stock checks
+  // - Missing product data
+  //
+  // --------------------------------------------------
+
+  const pos = eligiblePos;
+
+  console.log(
+    `Processing ALL eligible POs after cutoff.`
+  );
+
+  console.log(
+    `Total eligible POs to process: ${pos.length}`
+  );
+
+  console.log(
+    `Will process: ${
+      pos
+        .map(
+          (p) => p.OrderNumber
+        )
+        .join(", ") ||
+      "(none matched — check PO status/cutoff)"
+    }\n`
+  );
+
   // --------------------------------------------------
   // PROCESS POS
   // --------------------------------------------------
@@ -760,6 +1081,37 @@ console.log(
           continue;
         }
 
+        // ----------------------------------------------
+        // ASSIGN WAREHOUSE FIRST
+        // ----------------------------------------------
+
+        const warehouseCode =
+          await getOrAssignWarehouse(
+            child.Code,
+            state
+          );
+
+        // ----------------------------------------------
+        // REAL STOCK CHECK
+        // ----------------------------------------------
+
+        const stockAllowed =
+          await canContinuePresale(
+            child,
+            state,
+            poNumber,
+            supplierName,
+            warehouseCode
+          );
+
+        if (!stockAllowed) {
+          continue;
+        }
+
+        // ----------------------------------------------
+        // INVENTORY
+        // ----------------------------------------------
+
         const invKey =
           makeStateKey(
             "inv",
@@ -774,12 +1126,6 @@ console.log(
 
           continue;
         }
-
-        const warehouseCode =
-          await getOrAssignWarehouse(
-            child.Code,
-            state
-          );
 
         const ok =
           await addInventory(
@@ -798,6 +1144,7 @@ console.log(
               supplierName || null,
             productCode:
               child.Code,
+            warehouseCode,
           };
 
           saveState(state);
@@ -955,6 +1302,33 @@ console.log(
       }
 
       // ------------------------------------------------
+      // ASSIGN WAREHOUSE
+      // ------------------------------------------------
+
+      const warehouseCode =
+        await getOrAssignWarehouse(
+          product.Code,
+          state
+        );
+
+      // ------------------------------------------------
+      // REAL STOCK CHECK
+      // ------------------------------------------------
+
+      const stockAllowed =
+        await canContinuePresale(
+          product,
+          state,
+          poNumber,
+          supplierName,
+          warehouseCode
+        );
+
+      if (!stockAllowed) {
+        continue;
+      }
+
+      // ------------------------------------------------
       // INVENTORY
       // ------------------------------------------------
 
@@ -966,12 +1340,6 @@ console.log(
         );
 
       if (!state[invKey]) {
-        const warehouseCode =
-          await getOrAssignWarehouse(
-            product.Code,
-            state
-          );
-
         const ok =
           await addInventory(
             product.Code,
@@ -989,6 +1357,7 @@ console.log(
               supplierName || null,
             productCode:
               product.Code,
+            warehouseCode,
           };
 
           saveState(state);

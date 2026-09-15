@@ -43,7 +43,7 @@ const token = {
 };
 
 // --------------------------------------------------
-// SHARED AKL WAREHOUSE ASSIGNMENT
+// SHARED WAREHOUSE ASSIGNMENT
 // --------------------------------------------------
 
 const { getOrAssignWarehouse } = require("../AKL/warehouse-assignment");
@@ -69,13 +69,31 @@ const STATE_FILE = path.join(
 const EXCLUDED_SUPPLIERS = ["Parmco Ltd"];
 
 // --------------------------------------------------
+// REAL STOCK SETTINGS
+// --------------------------------------------------
+
+const STOCK_THRESHOLD = 20;
+
+const STOCK_RECHECK_DAYS = 7;
+
+const STOCK_RECHECK_MS =
+  STOCK_RECHECK_DAYS * 24 * 60 * 60 * 1000;
+
+// Valid real warehouse / aisle format:
+//
+// 5-36-A-1
+// 4-35-A-3
+// 12-10-B-4
+//
+const REAL_AISLE_REGEX =
+  /^\d{1,2}-\d{1,2}-[A-Za-z]-\d{1,2}$/;
+
+// --------------------------------------------------
 // PO CREATION CUTOFF
 // --------------------------------------------------
 
 const AUTOMATION_PO_CUTOFF_DATE = "2026-09-07";
 
-// PO must have a valid CreatedDate and must be
-// created on or after the cutoff date.
 function isPOEligible(po) {
   const createdDate = po.CreatedDate;
 
@@ -112,8 +130,8 @@ function isPOEligible(po) {
   return true;
 }
 
-// Keep this restricted while testing.
-const ALLOWED_PO_NUMBERS = ["PO1589"];
+// // Keep restricted while testing.
+// const ALLOWED_PO_NUMBERS = ["PO1589"];
 
 // --------------------------------------------------
 // STATE
@@ -125,15 +143,24 @@ function loadState() {
   }
 
   try {
-    return JSON.parse(fs.readFileSync(STATE_FILE, "utf8"));
+    return JSON.parse(
+      fs.readFileSync(STATE_FILE, "utf8")
+    );
   } catch (err) {
-    console.error(`Could not read ${STATE_FILE}:`, err.message);
+    console.error(
+      `Could not read ${STATE_FILE}:`,
+      err.message
+    );
+
     return {};
   }
 }
 
 function saveState(state) {
-  fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2));
+  fs.writeFileSync(
+    STATE_FILE,
+    JSON.stringify(state, null, 2)
+  );
 }
 
 // --------------------------------------------------
@@ -141,11 +168,15 @@ function saveState(state) {
 // --------------------------------------------------
 
 function withDsPrefix(title) {
-  return /^DS\s+/i.test(title) ? title : `DS ${title}`;
+  return /^DS\s+/i.test(title)
+    ? title
+    : `DS ${title}`;
 }
 
 function isExcludedByTitle(name) {
-  return (name || "").toUpperCase().includes("NZ MADE");
+  return (name || "")
+    .toUpperCase()
+    .includes("NZ MADE");
 }
 
 function isChildCode(code) {
@@ -153,7 +184,10 @@ function isChildCode(code) {
 }
 
 function parentCodeFromChildCode(childCode) {
-  return childCode.replace(/-[A-Za-z0-9]+$/, "");
+  return childCode.replace(
+    /-[A-Za-z0-9]+$/,
+    ""
+  );
 }
 
 // --------------------------------------------------
@@ -164,28 +198,20 @@ function isExcludedSupplier(supplierName) {
   return EXCLUDED_SUPPLIERS.some(
     (excluded) =>
       excluded.toLowerCase() ===
-      String(supplierName || "").trim().toLowerCase()
+      String(supplierName || "")
+        .trim()
+        .toLowerCase()
   );
 }
 
 // --------------------------------------------------
 // COMPLETED INVENTORY CYCLE HELPERS
 // --------------------------------------------------
-//
-// IMPORTANT:
-//
-// Inventory state is cycle-specific:
-//
-// inv:PO1589:PR15250
-// inv:PO1595:PR15250
-//
-// Both records must remain.
-//
-// The newest completed record is considered the
-// current presale cycle for that product.
-// --------------------------------------------------
 
-function getCompletedInventoryCycles(productCode, state) {
+function getCompletedInventoryCycles(
+  productCode,
+  state
+) {
   return Object.keys(state)
     .filter(
       (key) =>
@@ -205,27 +231,44 @@ function getCompletedInventoryCycles(productCode, state) {
           entry?.date ||
           entry?.processedDate ||
           "",
-        supplier: entry?.supplier || "",
+        supplier:
+          entry?.supplier || "",
         entry,
       };
     })
-    .filter((cycle) => cycle.entry?.done === true)
+    .filter(
+      (cycle) =>
+        cycle.entry?.done === true
+    )
     .sort((a, b) => {
-      const aTime = Date.parse(a.date || "");
-      const bTime = Date.parse(b.date || "");
+      const aTime = Date.parse(
+        a.date || ""
+      );
+
+      const bTime = Date.parse(
+        b.date || ""
+      );
 
       return (
-        (Number.isNaN(bTime) ? 0 : bTime) -
-        (Number.isNaN(aTime) ? 0 : aTime)
+        (Number.isNaN(bTime)
+          ? 0
+          : bTime) -
+        (Number.isNaN(aTime)
+          ? 0
+          : aTime)
       );
     });
 }
 
-function getCurrentCycleForProduct(productCode, state) {
-  const cycles = getCompletedInventoryCycles(
-    productCode,
-    state
-  );
+function getCurrentCycleForProduct(
+  productCode,
+  state
+) {
+  const cycles =
+    getCompletedInventoryCycles(
+      productCode,
+      state
+    );
 
   return cycles[0] || null;
 }
@@ -234,8 +277,13 @@ function getCurrentCycleForProduct(productCode, state) {
 // CHECK WHETHER PRODUCT ALREADY HAS CURRENT CYCLE
 // --------------------------------------------------
 
-function hasInventoryForCycle(productCode, poNumber, state) {
-  const key = `inv:${poNumber}:${productCode}`;
+function hasInventoryForCycle(
+  productCode,
+  poNumber,
+  state
+) {
+  const key =
+    `inv:${poNumber}:${productCode}`;
 
   return state[key]?.done === true;
 }
@@ -259,9 +307,15 @@ function hasRequiredProductData(product) {
   );
 
   return {
-    valid: description.length > 0 && price > 0,
-    hasDescription: description.length > 0,
-    hasPrice: price > 0,
+    valid:
+      description.length > 0 &&
+      price > 0,
+
+    hasDescription:
+      description.length > 0,
+
+    hasPrice:
+      price > 0,
   };
 }
 
@@ -275,7 +329,8 @@ function blockMissingProductData(
   poNumber,
   supplierName
 ) {
-  const check = hasRequiredProductData(product);
+  const check =
+    hasRequiredProductData(product);
 
   if (check.valid) {
     return false;
@@ -291,20 +346,20 @@ function blockMissingProductData(
     missing.push("price");
   }
 
-  const reason = `Missing ${missing.join(" and ")}`;
+  const reason =
+    `Missing ${missing.join(" and ")}`;
 
-  /*
-   * Keep the block PO-specific so that a block from one
-   * PO does not incorrectly represent another cycle.
-   */
-  const blockKey = `blocked:${poNumber}:${product.Code}`;
+  const blockKey =
+    `blocked:${poNumber}:${product.Code}`;
 
   state[blockKey] = {
     poNumber,
     supplier: supplierName,
     reason,
-    detectedAt: new Date().toISOString(),
-    productCode: product.Code,
+    detectedAt:
+      new Date().toISOString(),
+    productCode:
+      product.Code,
   };
 
   saveState(state);
@@ -321,158 +376,616 @@ function blockMissingProductData(
   return true;
 }
 
+// ==================================================
+// REAL STOCK SAFETY CHECK
+// ==================================================
+//
+// RULE:
+//
+// REAL STOCK >= 20
+//      => STOP PRESALE
+//
+// REAL STOCK < 20
+//      => ALLOW PRESALE
+//
+// UNKNOWN STOCK
+//      => STOP PRESALE FOR SAFETY
+//
+// If blocked because stock >= 20,
+// check again after 7 days.
+//
+// IMPORTANT:
+// nextCheckAt only records when the next check is due.
+// The script itself must run again after that time.
+//
+
+function getStockBlockKey(
+  poNumber,
+  productCode
+) {
+  return `blocked-stock:${poNumber}:${productCode}`;
+}
+
+function getStockBlock(
+  state,
+  poNumber,
+  productCode
+) {
+  const key =
+    getStockBlockKey(
+      poNumber,
+      productCode
+    );
+
+  return state[key] || null;
+}
+
+function isStockRecheckDue(block) {
+  if (!block) {
+    return true;
+  }
+
+  if (!block.nextCheckAt) {
+    return true;
+  }
+
+  const nextCheck =
+    new Date(
+      block.nextCheckAt
+    ).getTime();
+
+  if (!Number.isFinite(nextCheck)) {
+    return true;
+  }
+
+  return (
+    Date.now() >= nextCheck
+  );
+}
+
 // --------------------------------------------------
-// API GET
+// GET REAL WAREHOUSE / AISLE STOCK
 // --------------------------------------------------
+
+function getRealWarehouseStock(
+  product
+) {
+  const rows =
+    product?.PerWarehouseInventory;
+
+  if (!Array.isArray(rows)) {
+    return null;
+  }
+
+  const realAisles = [];
+
+  for (const row of rows) {
+    const warehouseCode =
+      String(
+        row?.WarehouseCode ??
+          row?.warehouseCode ??
+          row?.Code ??
+          row?.code ??
+          row?.WarehouseName ??
+          row?.warehouseName ??
+          ""
+      ).trim();
+
+    // Ignore presale warehouses and other
+    // non-real-stock locations.
+    if (
+      !REAL_AISLE_REGEX.test(
+        warehouseCode
+      )
+    ) {
+      continue;
+    }
+
+    const quantity =
+      Number(
+        row?.QuantityInStockSnapshot
+      );
+
+    if (!Number.isFinite(quantity)) {
+      return null;
+    }
+
+    realAisles.push({
+      warehouseCode,
+      quantity,
+    });
+  }
+
+  if (realAisles.length === 0) {
+    return null;
+  }
+
+  return realAisles;
+}
+
+// --------------------------------------------------
+// CHECK REAL STOCK BEFORE PRESALE
+// --------------------------------------------------
+
+async function checkRealStockBeforePresale(
+  product,
+  poNumber,
+  state,
+  supplierName
+) {
+  const productCode =
+    product.Code;
+
+  const blockKey =
+    getStockBlockKey(
+      poNumber,
+      productCode
+    );
+
+  const existingBlock =
+    getStockBlock(
+      state,
+      poNumber,
+      productCode
+    );
+
+  // ------------------------------------------------
+  // STILL WITHIN 7-DAY WAITING PERIOD
+  // ------------------------------------------------
+
+  if (
+    existingBlock &&
+    !isStockRecheckDue(
+      existingBlock
+    )
+  ) {
+    console.log(
+      `    ${productCode}: BLOCKED — ` +
+      `waiting for next real stock check`
+    );
+
+    console.log(
+      `    Previous real stock: ${
+        existingBlock.realStock
+      }`
+    );
+
+    console.log(
+      `    Next check: ${
+        existingBlock.nextCheckAt
+      }`
+    );
+
+    return false;
+  }
+
+  // ------------------------------------------------
+  // REFRESH PRODUCT FROM TRADEVINE
+  // ------------------------------------------------
+
+  const freshProduct =
+    await getProductByCode(
+      productCode
+    );
+
+  if (!freshProduct) {
+    const nextCheckAt =
+      new Date(
+        Date.now() +
+          STOCK_RECHECK_MS
+      ).toISOString();
+
+    state[blockKey] = {
+      poNumber,
+      productCode,
+      supplier:
+        supplierName || null,
+
+      reason:
+        "REAL_STOCK_CHECK_FAILED",
+
+      blockedAt:
+        existingBlock?.blockedAt ||
+        new Date().toISOString(),
+
+      lastCheckedAt:
+        new Date().toISOString(),
+
+      nextCheckAt,
+    };
+
+    saveState(state);
+
+    console.log(
+      `    ${productCode}: BLOCKED — ` +
+      `could not refresh Tradevine product`
+    );
+
+    log(
+      "warn",
+      `${productCode} / ${poNumber} — ` +
+      `could not refresh product for stock check`
+    );
+
+    return false;
+  }
+
+  // ------------------------------------------------
+  // GET REAL WAREHOUSE STOCK
+  // ------------------------------------------------
+
+  const realAisles =
+    getRealWarehouseStock(
+      freshProduct
+    );
+
+  // ------------------------------------------------
+  // UNKNOWN STOCK
+  // ------------------------------------------------
+
+  if (
+    realAisles === null
+  ) {
+    const nextCheckAt =
+      new Date(
+        Date.now() +
+          STOCK_RECHECK_MS
+      ).toISOString();
+
+    state[blockKey] = {
+      poNumber,
+      productCode,
+      supplier:
+        supplierName || null,
+
+      reason:
+        "REAL_STOCK_UNKNOWN",
+
+      realStock: null,
+
+      blockedAt:
+        existingBlock?.blockedAt ||
+        new Date().toISOString(),
+
+      lastCheckedAt:
+        new Date().toISOString(),
+
+      nextCheckAt,
+    };
+
+    saveState(state);
+
+    console.log(
+      `    ${productCode}: BLOCKED — ` +
+      `real warehouse stock could not be determined`
+    );
+
+    console.log(
+      `    NO presale inventory will be added`
+    );
+
+    log(
+      "warn",
+      `${productCode} / ${poNumber} — ` +
+      `REAL STOCK UNKNOWN — blocked for safety`
+    );
+
+    return false;
+  }
+
+  // ------------------------------------------------
+  // DISPLAY REAL AISLE STOCK
+  // ------------------------------------------------
+
+  console.log(
+    `    ${productCode}: real warehouse stock:`
+  );
+
+  for (const aisle of realAisles) {
+    console.log(
+      `      ${aisle.warehouseCode}: ${aisle.quantity}`
+    );
+  }
+
+  // ------------------------------------------------
+  // CRITICAL RULE
+  //
+  // ANY REAL AISLE >= 20
+  // => BLOCK
+  // ------------------------------------------------
+
+  const blockedAisle =
+    realAisles.find(
+      (aisle) =>
+        aisle.quantity >=
+        STOCK_THRESHOLD
+    );
+
+  if (blockedAisle) {
+    const nextCheckAt =
+      new Date(
+        Date.now() +
+          STOCK_RECHECK_MS
+      ).toISOString();
+
+    state[blockKey] = {
+      poNumber,
+      productCode,
+
+      supplier:
+        supplierName || null,
+
+      reason:
+        "REAL_STOCK_20_OR_MORE",
+
+      realStock:
+        blockedAisle.quantity,
+
+      blockedWarehouse:
+        blockedAisle.warehouseCode,
+
+      allRealAisles:
+        realAisles,
+
+      blockedAt:
+        existingBlock?.blockedAt ||
+        new Date().toISOString(),
+
+      lastCheckedAt:
+        new Date().toISOString(),
+
+      nextCheckAt,
+    };
+
+    saveState(state);
+
+    console.log("");
+    console.log(
+      `    ${productCode}: BLOCKED`
+    );
+
+    console.log(
+      `    Real stock at ${blockedAisle.warehouseCode}: ` +
+      `${blockedAisle.quantity} >= ${STOCK_THRESHOLD}`
+    );
+
+    console.log(
+      `    NO DS / NO inventory / NO BOM action`
+    );
+
+    console.log(
+      `    Next real stock check: ${nextCheckAt}`
+    );
+
+    log(
+      "warn",
+      `${productCode} / ${poNumber} — ` +
+      `BLOCKED because real stock at ` +
+      `${blockedAisle.warehouseCode} is ` +
+      `${blockedAisle.quantity}. ` +
+      `Next check ${nextCheckAt}`
+    );
+
+    return false;
+  }
+
+  // ------------------------------------------------
+  // REAL STOCK < 20
+  // => ALLOW PRESALE
+  // ------------------------------------------------
+
+  console.log("");
+  console.log(
+    `    ${productCode}: ALL REAL STOCK < ${STOCK_THRESHOLD} — PRESALE ALLOWED`
+  );
+
+  // ------------------------------------------------
+  // CLEAR PREVIOUS STOCK BLOCK
+  // ------------------------------------------------
+
+  if (existingBlock) {
+    delete state[blockKey];
+
+    saveState(state);
+
+    console.log(
+      `    ${productCode}: STOCK BLOCK CLEARED`
+    );
+
+    log(
+      "success",
+      `${productCode} / ${poNumber} — ` +
+      `real stock dropped below ${STOCK_THRESHOLD}; ` +
+      `presale automation proceeding`
+    );
+  }
+
+  return true;
+}
+
+// ==================================================
+// TRADEVINE GET
+// ==================================================
 
 async function apiGet(url) {
-  const authHeader = oauth.toHeader(
-    oauth.authorize(
-      {
-        url,
-        method: "GET",
-      },
-      token
-    )
-  );
-
-  const res = await fetch(url, {
+  const requestData = {
+    url,
     method: "GET",
-    headers: {
-      ...authHeader,
-      Accept: "application/json",
-    },
-  });
+  };
 
-  const text = await res.text();
+  const authHeader =
+    oauth.toHeader(
+      oauth.authorize(
+        requestData,
+        token
+      )
+    );
 
-  try {
-    return {
-      status: res.status,
-      data: JSONbig.parse(text),
-      raw: text,
-    };
-  } catch {
-    return {
-      status: res.status,
-      data: null,
-      raw: text,
-    };
-  }
-}
-
-// --------------------------------------------------
-// API POST
-// --------------------------------------------------
-
-async function apiPost(url, body) {
-  const authHeader = oauth.toHeader(
-    oauth.authorize(
-      {
-        url,
-        method: "POST",
+  const response =
+    await fetch(url, {
+      method: "GET",
+      headers: {
+        Authorization:
+          authHeader.Authorization,
+        Accept:
+          "application/json",
       },
-      token
-    )
-  );
+    });
 
-  const res = await fetch(url, {
-    method: "POST",
-    headers: {
-      ...authHeader,
-      "Content-Type": "application/json",
-      Accept: "application/json",
-    },
-    body: JSONbig.stringify(body),
-  });
+  const raw =
+    await response.text();
 
-  const text = await res.text();
+  let data = null;
 
   try {
-    return {
-      status: res.status,
-      data: JSONbig.parse(text),
-      raw: text,
-    };
+    data =
+      JSONbig.parse(raw);
   } catch {
-    return {
-      status: res.status,
-      data: null,
-      raw: text,
-    };
+    data = null;
   }
+
+  return {
+    status:
+      response.status,
+    data,
+    raw,
+  };
 }
 
-// --------------------------------------------------
-// GET ALL AWAITING RECEIPT POS
-// --------------------------------------------------
+// ==================================================
+// TRADEVINE POST
+// ==================================================
+
+async function apiPost(
+  url,
+  body
+) {
+  const requestData = {
+    url,
+    method: "POST",
+  };
+
+  const authHeader =
+    oauth.toHeader(
+      oauth.authorize(
+        requestData,
+        token
+      )
+    );
+
+  const response =
+    await fetch(url, {
+      method: "POST",
+      headers: {
+        Authorization:
+          authHeader.Authorization,
+        "Content-Type":
+          "application/json",
+        Accept:
+          "application/json",
+      },
+      body: JSON.stringify(body),
+    });
+
+  const raw =
+    await response.text();
+
+  let data = null;
+
+  try {
+    data =
+      JSONbig.parse(raw);
+  } catch {
+    data = null;
+  }
+
+  return {
+    status:
+      response.status,
+    data,
+    raw,
+  };
+}
+
+// ==================================================
+// GET ALL AWAITING RECEIPT POs
+// ==================================================
 
 async function getAllAwaitingReceiptPOs() {
   const url =
-    "https://api.tradevine.com/v1/PurchaseOrder" +
-    "?status=19001&pageSize=200";
+    "https://api.tradevine.com/v1/PurchaseOrder";
 
-  const result = await apiGet(url);
+  const result =
+    await apiGet(
+      `${url}?StatusID=19001&PageSize=200`
+    );
 
-  if (result.status !== 200 || !result.data) {
+  if (
+    result.status !== 200
+  ) {
     throw new Error(
-      `PurchaseOrder lookup failed — HTTP ${result.status}: ${
-        result.raw || ""
-      }`
+      `Failed to fetch Purchase Orders: HTTP ${result.status}`
     );
   }
 
   return (
-    result.data.List ||
-    result.data.list ||
+    result.data?.Items ||
+    result.data ||
     []
   );
 }
 
-// --------------------------------------------------
+// ==================================================
 // GET PRODUCT BY CODE
-// --------------------------------------------------
+// ==================================================
 
-async function getProductByCode(code) {
+async function getProductByCode(
+  productCode
+) {
   const url =
-    `https://api.tradevine.com/v1/Product` +
-    `?code=${encodeURIComponent(code)}` +
-    `&pageSize=10`;
+    `https://api.tradevine.com/v1/Product?Code=${encodeURIComponent(
+      productCode
+    )}`;
 
-  const result = await apiGet(url);
+  const result =
+    await apiGet(url);
 
   if (
-    result.status !== 200 ||
-    !result.data
+    result.status !== 200
   ) {
-    console.log(
-      `${code}: Product lookup failed — HTTP ${result.status}`
-    );
-
     return null;
   }
 
-  const list =
-    result.data.List ||
-    result.data.list ||
-    result.data;
+  if (
+    Array.isArray(
+      result.data?.Items
+    )
+  ) {
+    return (
+      result.data.Items[0] ||
+      null
+    );
+  }
 
-  if (!Array.isArray(list)) {
-    return null;
+  if (
+    Array.isArray(
+      result.data
+    )
+  ) {
+    return (
+      result.data[0] ||
+      null
+    );
   }
 
   return (
-    list.find(
-      (product) =>
-        String(product.Code).toUpperCase() ===
-        String(code).toUpperCase()
-    ) || null
+    result.data || null
   );
 }
 
-// --------------------------------------------------
+// ==================================================
 // ADD INVENTORY
-// --------------------------------------------------
+// ==================================================
 
 async function addInventory(
   productCode,
@@ -483,35 +996,55 @@ async function addInventory(
     "https://api.tradevine.com/v1/ProductInventory/MakeAdjustment";
 
   const body = {
-    ProductCode: productCode,
-    WarehouseCode: warehouseCode,
-    InventoryType: 36009,
-    QuantityChange: quantity,
-    ProductCostPrice: 0.0,
+    ProductCode:
+      productCode,
+
+    WarehouseCode:
+      warehouseCode,
+
+    InventoryType:
+      36009,
+
+    QuantityChange:
+      quantity,
+
+    ProductCostPrice:
+      0,
+
     Notes:
-      "Presale automation - initial stock",
+      "CHCH Presale automation - adding pre-order stock",
   };
 
-  const result = await apiPost(url, body);
+  const result =
+    await apiPost(
+      url,
+      body
+    );
 
-  log(
+  if (
     result.status === 200
-      ? "success"
-      : "error",
-    `Inventory +${quantity} on ${productCode}: ${
-      result.status === 200
-        ? "OK"
-        : "FAILED - " +
-          (result.raw || "").slice(0, 200)
-    }`
+  ) {
+    console.log(
+      `    ${productCode}: +${quantity} presale inventory added to ${warehouseCode} ✓`
+    );
+
+    return true;
+  }
+
+  console.log(
+    `    ${productCode}: FAILED to add presale inventory`
   );
 
-  return result.status === 200;
+  console.log(
+    result.raw?.slice(0, 500)
+  );
+
+  return false;
 }
 
-// --------------------------------------------------
-// PREFIX DS TITLE
-// --------------------------------------------------
+// ==================================================
+// PREFIX DS
+// ==================================================
 
 async function prefixTitle(
   product,
@@ -523,161 +1056,64 @@ async function prefixTitle(
     return false;
   }
 
-  const currentName = String(
-    product.Name || ""
-  );
+  const currentName =
+    String(
+      product.Name || ""
+    );
 
-  if (/^DS\s+/i.test(currentName)) {
+  if (
+    /^DS\s+/i.test(
+      currentName
+    )
+  ) {
     console.log(
-      `      Title already prefixed on ${product.Code}: "${currentName}" — skipping`
+      `    ${product.Code}: DS prefix already present ✓`
     );
 
     return true;
   }
 
-  const newName = withDsPrefix(
-    currentName
-  );
-
-  if (newName.length > 80) {
-    const blockKey =
-      `blocked:${poNumber}:${product.Code}`;
-
-    state[blockKey] = {
-      poNumber,
-      supplier: supplierName,
-      reason: "Title exceeds 80 chars",
-      detectedAt: new Date().toISOString(),
-      productCode: product.Code,
-    };
-
-    saveState(state);
-
-    log(
-      "warn",
-      `${product.Code} — title exceeds 80 chars, blocked for ${poNumber}`
+  const newName =
+    withDsPrefix(
+      currentName
     );
-
-    return false;
-  }
 
   const url =
     `https://api.tradevine.com/v1/Product/${product.ProductID}`;
 
-  const result = await apiPost(
-    url,
-    {
-      ...product,
-      Name: newName,
-    }
-  );
+  const result =
+    await apiPost(
+      url,
+      {
+        ...product,
+        Name: newName,
+      }
+    );
 
-  log(
+  if (
     result.status === 200
-      ? "success"
-      : "error",
-    `Title update on ${product.Code}: ${
-      result.status === 200
-        ? `OK — "${result.data?.Name || newName}"`
-        : "FAILED - " +
-          (result.raw || "").slice(0, 200)
-    }`
-  );
-
-  return result.status === 200;
-}
-
-// --------------------------------------------------
-// LINK BOM CHILDREN
-// --------------------------------------------------
-//
-// IMPORTANT:
-// Keep using parent.BoMComponents.
-// This is the working CHCH/WLG-compatible
-// Tradevine BOM structure.
-// --------------------------------------------------
-
-async function linkChildrenToParent(
-  parent,
-  childProductIds
-) {
-  const existing =
-    (parent.BoMComponents || []).filter(
-      (component) =>
-        component.BoMComponentProductID
-    );
-
-  const existingIds = new Set(
-    existing.map((component) =>
-      String(
-        component.BoMComponentProductID
-      )
-    )
-  );
-
-  const newOnes =
-    childProductIds.filter(
-      (id) =>
-        !existingIds.has(String(id))
-    );
-
-  if (newOnes.length === 0) {
+  ) {
     console.log(
-      `      BOM link already complete for ${parent.Code}`
+      `    ${product.Code}: DS prefix added ✓`
     );
 
     return true;
   }
 
-  const merged = [
-    ...existing.map((component) => ({
-      BoMComponentProductID:
-        component.BoMComponentProductID,
-
-      BoMComponentQuantity:
-        component.BoMComponentQuantity || 1,
-    })),
-
-    ...newOnes.map((id) => ({
-      BoMComponentProductID: id,
-      BoMComponentQuantity: 1,
-    })),
-  ];
-
-  const url =
-    `https://api.tradevine.com/v1/Product/SaveBoMComponents/${parent.ProductID}`;
-
-  const result = await apiPost(
-    url,
-    merged
+  console.log(
+    `    ${product.Code}: FAILED to add DS prefix`
   );
 
   console.log(
-    `      BOM link for ${parent.Code}: ${
-      result.status === 200
-        ? "OK"
-        : "FAILED - " +
-          (result.raw || "").slice(0, 200)
-    }`
+    result.raw?.slice(0, 500)
   );
 
-  if (result.status !== 200) {
-    log(
-      "error",
-      `${parent.Code}: BOM link failed — ${
-        result.raw || ""
-      }`.slice(0, 500)
-    );
-
-    return false;
-  }
-
-  return true;
+  return false;
 }
 
-// --------------------------------------------------
+// ==================================================
 // PROCESS BOM PARENT
-// --------------------------------------------------
+// ==================================================
 
 async function processBomParent(
   parentCode,
@@ -685,127 +1121,50 @@ async function processBomParent(
   po,
   state
 ) {
-  console.log("");
-  console.log(
-    `  Processing BOM parent: ${parentCode}`
-  );
+  const poNumber =
+    po.OrderNumber;
 
-  const poNumber = po.OrderNumber;
   const supplierName =
     po.Supplier?.Name || "";
 
   // ------------------------------------------------
-  // GET PARENT
+  // CRITICAL:
+  // CHECK ALL CHILDREN BEFORE ANY ACTION
   // ------------------------------------------------
-
-  const parent =
-    await getProductByCode(parentCode);
-
-  if (!parent) {
-    console.log(
-      `    BLOCKED: could not find parent product for code ${parentCode}`
-    );
-
-    return;
-  }
-
-  if (
-    isExcludedByTitle(parent.Name)
-  ) {
-    console.log(
-      `    ${parentCode}: title contains "NZ MADE" — excluded, skipping`
-    );
-
-    return;
-  }
-
-  // ------------------------------------------------
-  // CURRENT CYCLE
-  // ------------------------------------------------
-  //
-  // Children are the source of BOM inventory-cycle
-  // identity.
-  //
-  // All children for a BOM must belong to the same
-  // PO cycle.
-  // ------------------------------------------------
-
-  const childCycles = [];
-
-  for (const child of children) {
-    const cycle =
-      getCurrentCycleForProduct(
-        child.Code,
-        state
-      );
-
-    if (cycle) {
-      childCycles.push({
-        childCode: child.Code,
-        cycle,
-      });
-    }
-  }
-
-  const cyclePoNumbers = [
-    ...new Set(
-      childCycles.map(
-        (item) =>
-          String(
-            item.cycle.poNumber
-          ).toUpperCase()
-      )
-    ),
-  ];
-
-  if (
-    cyclePoNumbers.length > 0 &&
-    cyclePoNumbers.length !== 1
-  ) {
-    console.log(
-      `    ${parentCode}: BOM children are on different PO cycles — skipping`
-    );
-
-    for (const item of childCycles) {
-      console.log(
-        `      ${item.childCode}: ${item.cycle.poNumber}`
-      );
-    }
-
-    log(
-      "warn",
-      `${parentCode}: BOM children are on different PO cycles`
-    );
-
-    return;
-  }
-
-  /*
-   * The PO being processed is the authoritative cycle
-   * for this run.
-   *
-   * If a previous cycle exists in state, that is history
-   * and does not prevent this PO from being processed.
-   */
 
   console.log(
-    `    Current CHCH BOM cycle: ${poNumber}`
+    `    Checking real stock for all BOM children before processing ${parentCode}...`
   );
 
-  log(
-    "info",
-    `${parentCode}: current BOM cycle = ${poNumber}`
-  );
+  for (const child of children) {
+    const stockAllowed =
+      await checkRealStockBeforePresale(
+        child,
+        poNumber,
+        state,
+        supplierName
+      );
+
+    if (!stockAllowed) {
+      console.log("");
+      console.log(
+        `    ${parentCode}: BOM BLOCKED because child ${child.Code} failed real stock check`
+      );
+
+      log(
+        "warn",
+        `${parentCode} / ${poNumber} — BOM blocked because child ${child.Code} failed real stock check`
+      );
+
+      return;
+    }
+  }
 
   // ------------------------------------------------
-  // CHILD INVENTORY
+  // CHECK CHILD PRODUCT DATA
   // ------------------------------------------------
 
   for (const child of children) {
-    console.log(
-      `    Child: ${child.Code}`
-    );
-
     if (
       blockMissingProductData(
         child,
@@ -814,18 +1173,19 @@ async function processBomParent(
         supplierName
       )
     ) {
-      continue;
+      console.log(
+        `    ${parentCode}: BOM blocked because child ${child.Code} has missing product data`
+      );
+
+      return;
     }
+  }
 
-    const invKey =
-      `inv:${poNumber}:${child.Code}`;
+  // ------------------------------------------------
+  // ADD CHILD INVENTORY
+  // ------------------------------------------------
 
-    /*
-     * Cycle-specific inventory check.
-     *
-     * PO1589 and PO1595 are independent cycles.
-     */
-
+  for (const child of children) {
     if (
       hasInventoryForCycle(
         child.Code,
@@ -834,7 +1194,7 @@ async function processBomParent(
       )
     ) {
       console.log(
-        `      ${child.Code}: inventory already added for ${poNumber} — skipping`
+        `    ${child.Code}: inventory already added for ${poNumber} — skipping`
       );
 
       continue;
@@ -853,112 +1213,43 @@ async function processBomParent(
         warehouseCode
       );
 
-    if (ok) {
-      state[invKey] = {
-        done: true,
-        date:
-          new Date().toISOString(),
-        supplier:
-          supplierName || null,
-      };
-
-      saveState(state);
-
-      console.log(
-        `      ${child.Code}: inventory recorded for ${poNumber} ✓`
-      );
-    }
-  }
-
-  // ------------------------------------------------
-  // PARENT REQUIRED DATA
-  // ------------------------------------------------
-
-  if (
-    blockMissingProductData(
-      parent,
-      state,
-      poNumber,
-      supplierName
-    )
-  ) {
-    return;
-  }
-
-  // ------------------------------------------------
-  // BOM LINK
-  // ------------------------------------------------
-  //
-  // The BOM relationship itself is product-level.
-  // It does not need a separate BOM relationship for
-  // every PO cycle.
-  //
-  // However, the state record is updated with the PO
-  // that confirmed/processed this cycle.
-  // ------------------------------------------------
-
-  const bomKey =
-    `bom:${parentCode}`;
-
-  const existingBomState =
-    state[bomKey];
-
-  if (
-    existingBomState?.done === true &&
-    String(
-      existingBomState.poNumber || ""
-    ).toUpperCase() ===
-      String(poNumber).toUpperCase()
-  ) {
-    console.log(
-      `    BOM already recorded as done for ${parentCode} on ${poNumber}`
-    );
-  } else {
-    const freshParent =
-      await getProductByCode(
-        parentCode
-      );
-
-    if (!freshParent) {
-      console.log(
-        `    ${parentCode}: parent disappeared before BOM link — stopping`
-      );
-
-      return;
-    }
-
-    const ok =
-      await linkChildrenToParent(
-        freshParent,
-        children.map(
-          (child) =>
-            child.ProductID
-        )
-      );
-
     if (!ok) {
       console.log(
-        `    ${parentCode}: BOM linking failed — stopping`
+        `    ${parentCode}: child inventory failed for ${child.Code} — stopping BOM`
       );
 
       return;
     }
 
-    state[bomKey] = {
+    state[
+      `inv:${poNumber}:${child.Code}`
+    ] = {
       done: true,
       date:
         new Date().toISOString(),
       supplier:
         supplierName || null,
-      poNumber,
     };
 
     saveState(state);
-
-    console.log(
-      `    ${parentCode}: BOM state recorded for ${poNumber} ✓`
-    );
   }
+
+  // ------------------------------------------------
+  // PARENT BOM STATE
+  // ------------------------------------------------
+
+  state[
+    `bom:${parentCode}`
+  ] = {
+    done: true,
+    date:
+      new Date().toISOString(),
+    supplier:
+      supplierName || null,
+    poNumber,
+  };
+
+  saveState(state);
 
   // ------------------------------------------------
   // PARENT TITLE
@@ -975,7 +1266,9 @@ async function processBomParent(
     String(
       existingTitleState.poNumber || ""
     ).toUpperCase() ===
-      String(poNumber).toUpperCase()
+      String(
+        poNumber
+      ).toUpperCase()
   ) {
     console.log(
       `    Title already recorded as done for ${parentCode} on ${poNumber}`
@@ -1036,9 +1329,9 @@ async function processBomParent(
   );
 }
 
-// --------------------------------------------------
+// ==================================================
 // PROCESS STANDALONE PRODUCT
-// --------------------------------------------------
+// ==================================================
 
 async function processStandaloneProduct(
   product,
@@ -1054,6 +1347,30 @@ async function processStandaloneProduct(
   console.log(
     `  Standalone: ${product.Code}`
   );
+
+  // ------------------------------------------------
+  // REAL STOCK CHECK FIRST
+  // ------------------------------------------------
+
+  const stockAllowed =
+    await checkRealStockBeforePresale(
+      product,
+      poNumber,
+      state,
+      supplierName
+    );
+
+  if (!stockAllowed) {
+    console.log(
+      `    ${product.Code}: presale actions skipped because real stock check blocked it`
+    );
+
+    return;
+  }
+
+  // ------------------------------------------------
+  // PRODUCT DATA
+  // ------------------------------------------------
 
   if (
     blockMissingProductData(
@@ -1125,7 +1442,9 @@ async function processStandaloneProduct(
     String(
       existingTitleState.poNumber || ""
     ).toUpperCase() ===
-      String(poNumber).toUpperCase()
+      String(
+        poNumber
+      ).toUpperCase()
   ) {
     console.log(
       `    Title already recorded as done for ${product.Code} on ${poNumber}`
@@ -1173,27 +1492,36 @@ async function processStandaloneProduct(
   }
 }
 
-// --------------------------------------------------
+// ==================================================
 // MAIN
-// --------------------------------------------------
+// ==================================================
 
 async function main() {
   console.log("");
   console.log(
     "=============================================="
   );
+
   console.log(
     " CHCH BOM / PRESALE AUTOMATION"
   );
+
   console.log(
     " INVENTORY + BOM + TITLE"
   );
+
   console.log(
-    " + CYCLE 1 / CYCLE 2 SUPPORT"
+    " + REAL STOCK SAFETY CHECK"
   );
+
+  console.log(
+    " + 7-DAY STOCK RECHECK"
+  );
+
   console.log(
     "=============================================="
   );
+
   console.log("");
 
   const state =
@@ -1202,59 +1530,68 @@ async function main() {
   const allPos =
     await getAllAwaitingReceiptPOs();
 
-
-console.log(
-  `Found ${allPos.length} total Awaiting Receipt PO(s) on this account.`
-);
-
-// --------------------------------------------------
-// PO CREATION CUTOFF
-// --------------------------------------------------
-
-const eligiblePos =
-  allPos.filter(isPOEligible);
-
-console.log(
-  `PO cutoff: ${AUTOMATION_PO_CUTOFF_DATE}`
-);
-
-console.log(
-  `Eligible POs after cutoff: ${eligiblePos.length}`
-);
-
-// --------------------------------------------------
-// SAFETY RESTRICTION
-// Keep single-PO restriction for now.
-// --------------------------------------------------
-
-const pos =
-  eligiblePos.filter(
-    (po) =>
-      ALLOWED_PO_NUMBERS.includes(
-        po.OrderNumber
-      )
+  console.log(
+    `Found ${allPos.length} total Awaiting Receipt PO(s) on this account.`
   );
 
-console.log(
-  `Restricted to: ${ALLOWED_PO_NUMBERS.join(
-    ", "
-  )}`
-);
+  // ------------------------------------------------
+  // PO CREATION CUTOFF
+  // ------------------------------------------------
 
-console.log(
-  `Will process: ${
-    pos
-      .map(
-        (p) =>
-          p.OrderNumber
-      )
-      .join(", ") ||
-    "(none matched — PO may be before cutoff)"
-  }\n`
-);
+  const eligiblePos =
+    allPos.filter(
+      isPOEligible
+    );
+
+  console.log(
+    `PO cutoff: ${AUTOMATION_PO_CUTOFF_DATE}`
+  );
+
+  console.log(
+    `Eligible POs after cutoff: ${eligiblePos.length}`
+  );
 
   // ------------------------------------------------
-  // PROCESS POS
+  // PROCESS ALL ELIGIBLE POs
+  // ------------------------------------------------
+  //
+  // No single-PO restriction.
+  // Every Awaiting Receipt PO created on or after
+  // the cutoff date will be processed.
+  //
+  // Additional safety checks still apply:
+  // - Excluded suppliers
+  // - NZ MADE products
+  // - Real stock >= 20
+  // - Unknown real stock
+  // - Missing product data
+  //
+  // ------------------------------------------------
+
+  const pos = eligiblePos;
+
+  console.log(
+    `Processing ALL eligible POs after cutoff.`
+  );
+
+  console.log(
+    `Total eligible POs to process: ${pos.length}`
+  );
+
+  console.log(
+    `Will process: ${
+      pos
+        .map(
+          (p) =>
+            p.OrderNumber
+        )
+        .join(", ") ||
+      "(none matched — check PO status/cutoff)"
+    }\n`
+  );
+
+  // ------------------------------------------------
+  // PROCESS POs
   // ------------------------------------------------
 
   for (const po of pos) {
@@ -1280,13 +1617,17 @@ console.log(
     const childrenByParent =
       {};
 
-    const standalone = [];
+    const standalone =
+      [];
 
     // ------------------------------------------------
     // READ PO PRODUCTS
     // ------------------------------------------------
 
-    for (const line of po.PurchaseOrderLines || []) {
+    for (
+      const line of
+        po.PurchaseOrderLines || []
+    ) {
       const productId =
         line.productId ||
         line.ProductID;
@@ -1364,9 +1705,12 @@ console.log(
     // BOM PARENT GROUPS
     // ------------------------------------------------
 
-    for (const parentCode of Object.keys(
-      childrenByParent
-    )) {
+    for (
+      const parentCode of
+        Object.keys(
+          childrenByParent
+        )
+    ) {
       try {
         console.log(
           `  Parent group: ${parentCode}`
@@ -1376,12 +1720,6 @@ console.log(
           childrenByParent[
             parentCode
           ];
-
-        /*
-         * IMPORTANT:
-         * Do not process a BOM parent if there are
-         * no actual children.
-         */
 
         if (
           !children ||
@@ -1416,7 +1754,10 @@ console.log(
     // STANDALONE PRODUCTS
     // ------------------------------------------------
 
-    for (const product of standalone) {
+    for (
+      const product of
+        standalone
+    ) {
       try {
         await processStandaloneProduct(
           product,
@@ -1450,18 +1791,19 @@ console.log(
   );
 }
 
-// --------------------------------------------------
+// ==================================================
 // RUN
-// --------------------------------------------------
+// ==================================================
 
-main().catch((err) => {
-  console.error(
-    "SCRIPT CRASHED:",
-    err.message
-  );
+main().catch(
+  (err) => {
+    console.error(
+      "SCRIPT CRASHED:",
+      err.message
+    );
 
-  console.error(err);
+    console.error(err);
 
-  process.exit(1);
-});
-
+    process.exit(1);
+  }
+);
