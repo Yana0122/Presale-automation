@@ -11,17 +11,25 @@ const JSONbig = require("json-bigint")({
 const LOG_FILE = "./automation.log";
 
 // --------------------------------------------------
-// STOCK CONTROL
+// STOCK / PRESALE CONTROL
 // --------------------------------------------------
 
-const PRESALE_QTY = 20;
+// Presale allocation is now 33% of incoming PO stock.
+const PRESALE_PERCENTAGE = 0.33;
 
 // Maximum real warehouse stock allowed for presale.
-// If real stock is ABOVE this number, presale is stopped.
+//
+// 20 or more = STOP PRESALE
+// Below 20 = PRESALE ALLOWED
+//
 const REAL_STOCK_LIMIT = 20;
 
-// After this many days, real warehouse stock is checked again.
+// Recheck blocked real stock after 7 days.
 const STOCK_RECHECK_DAYS = 7;
+
+// --------------------------------------------------
+// LOGGING
+// --------------------------------------------------
 
 function log(type, msg) {
   const entry = {
@@ -31,7 +39,44 @@ function log(type, msg) {
   };
 
   console.log(`[${type.toUpperCase()}] ${msg}`);
-  fs.appendFileSync(LOG_FILE, JSON.stringify(entry) + "\n");
+
+  fs.appendFileSync(
+    LOG_FILE,
+    JSON.stringify(entry) + "\n"
+  );
+}
+
+// --------------------------------------------------
+// PRESALE QUANTITY
+// --------------------------------------------------
+
+function getPresaleQuantity(incomingQuantity) {
+  const quantity = Number(incomingQuantity);
+
+  if (!Number.isFinite(quantity) || quantity <= 0) {
+    return 0;
+  }
+
+  // 33% of incoming stock.
+  //
+  // Math.ceil ensures that small incoming quantities
+  // still receive at least 1 presale unit when 33%
+  // is greater than zero.
+  //
+  // Examples:
+  //
+  // 1  -> 1
+  // 2  -> 1
+  // 3  -> 1
+  // 4  -> 2
+  // 5  -> 2
+  // 10 -> 4
+  // 20 -> 7
+  // 50 -> 17
+  //
+  return Math.ceil(
+    quantity * PRESALE_PERCENTAGE
+  );
 }
 
 // --------------------------------------------------
@@ -43,9 +88,14 @@ const oauth = OAuth({
     key: process.env.WLG_TV_CONSUMER_KEY,
     secret: process.env.WLG_TV_CONSUMER_SECRET,
   },
+
   signature_method: "HMAC-SHA1",
+
   hash_function: (base, key) =>
-    crypto.createHmac("sha1", key).update(base).digest("base64"),
+    crypto
+      .createHmac("sha1", key)
+      .update(base)
+      .digest("base64"),
 });
 
 const token = {
@@ -57,7 +107,11 @@ const token = {
 // CONFIG
 // --------------------------------------------------
 
-const { getOrAssignWarehouse } = require("../AKL/warehouse-assignment");
+const {
+  getOrAssignWarehouse,
+} = require(
+  "../AKL/warehouse-assignment"
+);
 
 const STATE_FILE = path.join(
   __dirname,
@@ -67,16 +121,20 @@ const STATE_FILE = path.join(
   "processed-state-wlg.json"
 );
 
-const EXCLUDED_SUPPLIERS = ["Parmco Ltd"];
+const EXCLUDED_SUPPLIERS = [
+  "Parmco Ltd",
+];
 
 // --------------------------------------------------
 // PO CREATION CUTOFF
 // --------------------------------------------------
 
-const AUTOMATION_PO_CUTOFF_DATE = "2026-09-07";
+const AUTOMATION_PO_CUTOFF_DATE =
+  "2026-09-07";
 
 function isPOEligible(po) {
-  const createdDate = po.CreatedDate;
+  const createdDate =
+    po.CreatedDate;
 
   if (!createdDate) {
     console.log(
@@ -86,13 +144,19 @@ function isPOEligible(po) {
     return false;
   }
 
-  const poDate = new Date(createdDate);
+  const poDate =
+    new Date(createdDate);
 
-  const cutoffDate = new Date(
-    `${AUTOMATION_PO_CUTOFF_DATE}T00:00:00`
-  );
+  const cutoffDate =
+    new Date(
+      `${AUTOMATION_PO_CUTOFF_DATE}T00:00:00`
+    );
 
-  if (Number.isNaN(poDate.getTime())) {
+  if (
+    Number.isNaN(
+      poDate.getTime()
+    )
+  ) {
     console.log(
       `⚠️ ${po.OrderNumber}: Invalid PO creation date "${createdDate}" — SKIPPING`
     );
@@ -100,7 +164,9 @@ function isPOEligible(po) {
     return false;
   }
 
-  if (poDate < cutoffDate) {
+  if (
+    poDate < cutoffDate
+  ) {
     console.log(
       `⏭️ ${po.OrderNumber}: SKIPPED — created ${createdDate}, before cutoff ${AUTOMATION_PO_CUTOFF_DATE}`
     );
@@ -112,12 +178,6 @@ function isPOEligible(po) {
 }
 
 // --------------------------------------------------
-// SAFETY RESTRICTION WHILE TESTING
-// --------------------------------------------------
-
-// const ALLOWED_PO_NUMBERS = ["PO1560"];
-
-// --------------------------------------------------
 // STATE
 // --------------------------------------------------
 
@@ -127,7 +187,12 @@ function loadState() {
   }
 
   try {
-    return JSON.parse(fs.readFileSync(STATE_FILE, "utf8"));
+    return JSON.parse(
+      fs.readFileSync(
+        STATE_FILE,
+        "utf8"
+      )
+    );
   } catch (err) {
     log(
       "error",
@@ -141,7 +206,11 @@ function loadState() {
 function saveState(state) {
   fs.writeFileSync(
     STATE_FILE,
-    JSON.stringify(state, null, 2)
+    JSON.stringify(
+      state,
+      null,
+      2
+    )
   );
 }
 
@@ -149,9 +218,24 @@ function saveState(state) {
 // CYCLE-AWARE STATE KEYS
 // --------------------------------------------------
 
-function makeStateKey(type, poNumber, productCode) {
-  const po = String(poNumber || "").trim().toUpperCase();
-  const code = String(productCode || "").trim().toUpperCase();
+function makeStateKey(
+  type,
+  poNumber,
+  productCode
+) {
+  const po =
+    String(
+      poNumber || ""
+    )
+      .trim()
+      .toUpperCase();
+
+  const code =
+    String(
+      productCode || ""
+    )
+      .trim()
+      .toUpperCase();
 
   return `${type}:${po}:${code}`;
 }
@@ -164,30 +248,39 @@ function makeStateKey(type, poNumber, productCode) {
 // blocked:PO1560:PR13374
 // stockcheck:PO1560:PR13374-A
 //
-// The stockcheck key is also PO/product specific so the
-// same product can enter presale again on a future PO.
+// Each state entry is PO/product specific so that
+// the same product can be processed again on a
+// future PO.
 
 // --------------------------------------------------
 // HELPERS
 // --------------------------------------------------
 
 function withDsPrefix(title) {
-  return title.startsWith("DS ")
+  return /^DS\s+/i.test(
+    String(title || "")
+  )
     ? title
     : `DS ${title}`;
 }
 
 function isExcludedByTitle(name) {
-  return (name || "")
+  return String(
+    name || ""
+  )
     .toUpperCase()
     .includes("NZ MADE");
 }
 
 function isChildCode(code) {
-  return /^.+-[A-Za-z0-9]+$/.test(code);
+  return /^.+-[A-Za-z0-9]+$/.test(
+    String(code || "")
+  );
 }
 
-function parentCodeFromChildCode(childCode) {
+function parentCodeFromChildCode(
+  childCode
+) {
   return childCode.replace(
     /-[A-Za-z0-9]+$/,
     ""
@@ -198,19 +291,23 @@ function parentCodeFromChildCode(childCode) {
 // PRODUCT DATA VALIDATION
 // --------------------------------------------------
 
-function hasRequiredProductData(product) {
-  const description = String(
-    product.Description ??
-      product.DescriptionHtml ??
-      ""
-  ).trim();
+function hasRequiredProductData(
+  product
+) {
+  const description =
+    String(
+      product.Description ??
+        product.DescriptionHtml ??
+        ""
+    ).trim();
 
-  const price = Number(
-    product.Price ??
-      product.SellingPrice ??
-      product.RetailPrice ??
-      0
-  );
+  const price =
+    Number(
+      product.Price ??
+        product.SellingPrice ??
+        product.RetailPrice ??
+        0
+    );
 
   return {
     valid:
@@ -232,7 +329,9 @@ function blockMissingProductData(
   supplierName
 ) {
   const check =
-    hasRequiredProductData(product);
+    hasRequiredProductData(
+      product
+    );
 
   if (check.valid) {
     return false;
@@ -241,7 +340,9 @@ function blockMissingProductData(
   const missing = [];
 
   if (!check.hasDescription) {
-    missing.push("description");
+    missing.push(
+      "description"
+    );
   }
 
   if (!check.hasPrice) {
@@ -249,20 +350,26 @@ function blockMissingProductData(
   }
 
   const reason =
-    `Missing ${missing.join(" and ")}`;
+    `Missing ${missing.join(
+      " and "
+    )}`;
 
-  const blockedKey = makeStateKey(
-    "blocked",
-    poNumber,
-    product.Code
-  );
+  const blockedKey =
+    makeStateKey(
+      "blocked",
+      poNumber,
+      product.Code
+    );
 
   state[blockedKey] = {
     poNumber,
-    supplier: supplierName,
+    supplier:
+      supplierName,
     reason,
-    detectedAt: new Date().toISOString(),
-    productCode: product.Code,
+    detectedAt:
+      new Date().toISOString(),
+    productCode:
+      product.Code,
   };
 
   saveState(state);
@@ -280,70 +387,118 @@ function blockMissingProductData(
 }
 
 // --------------------------------------------------
-// API
+// API GET
 // --------------------------------------------------
 
 async function apiGet(url) {
-  const authHeader = oauth.toHeader(
-    oauth.authorize(
+  const authHeader =
+    oauth.toHeader(
+      oauth.authorize(
+        {
+          url,
+          method: "GET",
+        },
+        token
+      )
+    );
+
+  const res =
+    await fetch(
+      url,
       {
-        url,
         method: "GET",
-      },
-      token
-    )
-  );
 
-  const res = await fetch(url, {
-    method: "GET",
-    headers: {
-      ...authHeader,
-      Accept: "application/json",
-    },
-  });
+        headers: {
+          ...authHeader,
+          Accept:
+            "application/json",
+        },
+      }
+    );
 
-  const text = await res.text();
+  const text =
+    await res.text();
+
+  let data;
+
+  try {
+    data =
+      JSONbig.parse(text);
+  } catch {
+    data = null;
+  }
 
   return {
     status: res.status,
-    data: JSONbig.parse(text),
+    data,
+    raw: text,
   };
 }
 
-async function apiPost(url, body) {
-  const authHeader = oauth.toHeader(
-    oauth.authorize(
+// --------------------------------------------------
+// API POST
+// --------------------------------------------------
+
+async function apiPost(
+  url,
+  body
+) {
+  const authHeader =
+    oauth.toHeader(
+      oauth.authorize(
+        {
+          url,
+          method: "POST",
+        },
+        token
+      )
+    );
+
+  const res =
+    await fetch(
+      url,
       {
-        url,
         method: "POST",
-      },
-      token
-    )
-  );
 
-  const res = await fetch(url, {
-    method: "POST",
-    headers: {
-      ...authHeader,
-      "Content-Type": "application/json",
-      Accept: "application/json",
-    },
-    body: JSON.stringify(body),
-  });
+        headers: {
+          ...authHeader,
 
-  const text = await res.text();
+          "Content-Type":
+            "application/json",
+
+          Accept:
+            "application/json",
+        },
+
+        body:
+          JSON.stringify(body),
+      }
+    );
+
+  const text =
+    await res.text();
 
   try {
     return {
-      status: res.status,
-      data: JSONbig.parse(text),
-      raw: text,
+      status:
+        res.status,
+
+      data:
+        JSONbig.parse(text),
+
+      raw:
+        text,
     };
   } catch {
     return {
-      status: res.status,
-      data: null,
-      raw: text,
+      status:
+        res.status,
+
+      data:
+        null,
+
+      raw:
+        text,
     };
   }
 }
@@ -370,14 +525,41 @@ async function getRealWarehouseStock(
       productCode
     )}&pageSize=10`;
 
-  const { data } = await apiGet(url);
+  const {
+    data,
+  } =
+    await apiGet(url);
+
+  if (!data) {
+    log(
+      "error",
+      `${productCode}: No data returned while checking warehouse stock`
+    );
+
+    return null;
+  }
 
   const list =
     data.List || data;
 
+  if (!Array.isArray(list)) {
+    log(
+      "error",
+      `${productCode}: Invalid product list returned while checking warehouse stock`
+    );
+
+    return null;
+  }
+
   const product =
     list.find(
-      (p) => p.Code === productCode
+      (p) =>
+        String(
+          p.Code || ""
+        ).trim() ===
+        String(
+          productCode || ""
+        ).trim()
     ) || null;
 
   if (!product) {
@@ -390,15 +572,20 @@ async function getRealWarehouseStock(
   }
 
   const warehouses =
-    product.PerWarehouseInventory || [];
+    product.PerWarehouseInventory ||
+    [];
 
   const warehouse =
     warehouses.find(
       (w) =>
-        String(w.WarehouseCode || "")
+        String(
+          w.WarehouseCode || ""
+        )
           .trim()
           .toUpperCase() ===
-        String(warehouseCode || "")
+        String(
+          warehouseCode || ""
+        )
           .trim()
           .toUpperCase()
     );
@@ -409,14 +596,20 @@ async function getRealWarehouseStock(
       `${productCode}: Warehouse ${warehouseCode} not found in PerWarehouseInventory`
     );
 
-    return 0;
+    // No matching warehouse means we cannot safely
+    // determine the real stock.
+    return null;
   }
 
-  const stock = Number(
-    warehouse.QuantityInStockSnapshot ?? 0
-  );
+  const stock =
+    Number(
+      warehouse.QuantityInStockSnapshot ??
+        0
+    );
 
-  if (Number.isNaN(stock)) {
+  if (
+    Number.isNaN(stock)
+  ) {
     log(
       "error",
       `${productCode}: Invalid warehouse stock returned for ${warehouseCode}`
@@ -429,33 +622,44 @@ async function getRealWarehouseStock(
 }
 
 // --------------------------------------------------
-// STOCK CHECK
+// DAYS SINCE CHECK
 // --------------------------------------------------
 
-function daysSince(dateString) {
+function daysSince(
+  dateString
+) {
   if (!dateString) {
     return Infinity;
   }
 
-  const date = new Date(dateString);
+  const date =
+    new Date(dateString);
 
-  if (Number.isNaN(date.getTime())) {
+  if (
+    Number.isNaN(
+      date.getTime()
+    )
+  ) {
     return Infinity;
   }
 
   const diff =
-    Date.now() - date.getTime();
+    Date.now() -
+    date.getTime();
 
-  return diff / (
-    1000 *
-    60 *
-    60 *
-    24
+  return (
+    diff /
+    (
+      1000 *
+      60 *
+      60 *
+      24
+    )
   );
 }
 
 // --------------------------------------------------
-// CHECK WHETHER REAL STOCK ALLOWS PRESALE
+// REAL STOCK PRESALE CHECK
 // --------------------------------------------------
 
 async function canContinuePresale(
@@ -465,11 +669,12 @@ async function canContinuePresale(
   supplierName,
   warehouseCode
 ) {
-  const stockKey = makeStateKey(
-    "stockcheck",
-    poNumber,
-    product.Code
-  );
+  const stockKey =
+    makeStateKey(
+      "stockcheck",
+      poNumber,
+      product.Code
+    );
 
   const existingCheck =
     state[stockKey];
@@ -489,7 +694,9 @@ async function canContinuePresale(
         warehouseCode
       );
 
-    if (realStock === null) {
+    if (
+      realStock === null
+    ) {
       console.log(
         `    ${product.Code}: REAL STOCK CHECK FAILED — skipping presale for safety`
       );
@@ -498,36 +705,57 @@ async function canContinuePresale(
     }
 
     state[stockKey] = {
-      productCode: product.Code,
+      productCode:
+        product.Code,
+
       poNumber,
-      supplier: supplierName || null,
+
+      supplier:
+        supplierName ||
+        null,
+
       warehouseCode,
+
       realStock,
+
       checkedAt:
         new Date().toISOString(),
+
       status:
-        realStock > REAL_STOCK_LIMIT
+        realStock >=
+        REAL_STOCK_LIMIT
           ? "STOPPED_HIGH_REAL_STOCK"
           : "PRESALE_ALLOWED",
     };
 
     saveState(state);
 
-    if (realStock > REAL_STOCK_LIMIT) {
+    // ------------------------------------------------
+    // 20 OR MORE = STOP
+    // ------------------------------------------------
+
+    if (
+      realStock >=
+      REAL_STOCK_LIMIT
+    ) {
       console.log(
-        `    ${product.Code}: REAL STOCK ${realStock} > ${REAL_STOCK_LIMIT} — STOPPING PRESALE`
+        `    ${product.Code}: REAL STOCK ${realStock} >= ${REAL_STOCK_LIMIT} — STOPPING PRESALE`
       );
 
       log(
         "warn",
-        `${product.Code} + ${poNumber}: real ${warehouseCode} stock is ${realStock}, above limit ${REAL_STOCK_LIMIT} — presale stopped`
+        `${product.Code} + ${poNumber}: real ${warehouseCode} stock is ${realStock}, at/above limit ${REAL_STOCK_LIMIT} — presale stopped`
       );
 
       return false;
     }
 
+    // ------------------------------------------------
+    // BELOW 20 = ALLOW
+    // ------------------------------------------------
+
     console.log(
-      `    ${product.Code}: REAL STOCK ${realStock} <= ${REAL_STOCK_LIMIT} — presale allowed`
+      `    ${product.Code}: REAL STOCK ${realStock} < ${REAL_STOCK_LIMIT} — presale allowed`
     );
 
     return true;
@@ -561,7 +789,9 @@ async function canContinuePresale(
         warehouseCode
       );
 
-    if (currentStock === null) {
+    if (
+      currentStock === null
+    ) {
       console.log(
         `    ${product.Code}: REAL STOCK RECHECK FAILED — skipping presale for safety`
       );
@@ -570,22 +800,30 @@ async function canContinuePresale(
     }
 
     const decreased =
-      currentStock < previousStock;
+      currentStock <
+      previousStock;
 
     state[stockKey] = {
       ...existingCheck,
+
       previousRealStock:
         previousStock,
+
       realStock:
         currentStock,
+
       previousCheckedAt:
         existingCheck.checkedAt,
+
       checkedAt:
         new Date().toISOString(),
+
       stockDecreased:
         decreased,
+
       status:
-        currentStock > REAL_STOCK_LIMIT
+        currentStock >=
+        REAL_STOCK_LIMIT
           ? "STOPPED_HIGH_REAL_STOCK"
           : "PRESALE_ALLOWED",
     };
@@ -608,18 +846,27 @@ async function canContinuePresale(
       );
     }
 
+    // ------------------------------------------------
+    // STILL 20 OR MORE
+    // ------------------------------------------------
+
     if (
-      currentStock > REAL_STOCK_LIMIT
+      currentStock >=
+      REAL_STOCK_LIMIT
     ) {
       console.log(
-        `    ${product.Code}: REAL STOCK ${currentStock} > ${REAL_STOCK_LIMIT} — STOPPING PRESALE`
+        `    ${product.Code}: REAL STOCK ${currentStock} >= ${REAL_STOCK_LIMIT} — STOPPING PRESALE`
       );
 
       return false;
     }
 
+    // ------------------------------------------------
+    // NOW BELOW 20
+    // ------------------------------------------------
+
     console.log(
-      `    ${product.Code}: REAL STOCK ${currentStock} <= ${REAL_STOCK_LIMIT} — presale allowed`
+      `    ${product.Code}: REAL STOCK ${currentStock} < ${REAL_STOCK_LIMIT} — presale allowed`
     );
 
     return true;
@@ -630,11 +877,13 @@ async function canContinuePresale(
   // ------------------------------------------------
 
   if (
-    Number(existingCheck.realStock) >
+    Number(
+      existingCheck.realStock
+    ) >=
     REAL_STOCK_LIMIT
   ) {
     console.log(
-      `    ${product.Code}: Previous real stock check was ${existingCheck.realStock} > ${REAL_STOCK_LIMIT} — presale remains stopped`
+      `    ${product.Code}: Previous real stock check was ${existingCheck.realStock} >= ${REAL_STOCK_LIMIT} — presale remains stopped`
     );
 
     return false;
@@ -648,36 +897,66 @@ async function canContinuePresale(
 }
 
 // --------------------------------------------------
-// GET ALL AWAITING RECEIPT POS
+// GET ALL AWAITING RECEIPT POs
 // --------------------------------------------------
 
 async function getAllAwaitingReceiptPOs() {
   const url =
     "https://api.tradevine.com/v1/PurchaseOrder?status=19001&pageSize=200";
 
-  const { data } = await apiGet(url);
+  const {
+    data,
+  } =
+    await apiGet(url);
 
-  return data.List || [];
+  if (!data) {
+    return [];
+  }
+
+  return (
+    data.List ||
+    []
+  );
 }
 
 // --------------------------------------------------
 // GET PRODUCT
 // --------------------------------------------------
 
-async function getProductByCode(code) {
+async function getProductByCode(
+  code
+) {
   const url =
     `https://api.tradevine.com/v1/Product?code=${encodeURIComponent(
       code
     )}&pageSize=10`;
 
-  const { data } = await apiGet(url);
+  const {
+    data,
+  } =
+    await apiGet(url);
+
+  if (!data) {
+    return null;
+  }
 
   const list =
-    data.List || data;
+    data.List ||
+    data;
+
+  if (!Array.isArray(list)) {
+    return null;
+  }
 
   return (
     list.find(
-      (p) => p.Code === code
+      (p) =>
+        String(
+          p.Code || ""
+        ).trim() ===
+        String(
+          code || ""
+        ).trim()
     ) || null
   );
 }
@@ -695,33 +974,53 @@ async function addInventory(
     "https://api.tradevine.com/v1/ProductInventory/MakeAdjustment";
 
   const body = {
-    ProductCode: productCode,
-    WarehouseCode: warehouseCode,
-    InventoryType: 36009,
-    QuantityChange: quantity,
-    ProductCostPrice: 0.0,
-    Notes: "Presale automation - initial stock",
+    ProductCode:
+      productCode,
+
+    WarehouseCode:
+      warehouseCode,
+
+    // Presale inventory type.
+    InventoryType:
+      36009,
+
+    QuantityChange:
+      quantity,
+
+    ProductCostPrice:
+      0.0,
+
+    Notes:
+      "WLG Presale automation - 33% incoming PO stock",
   };
 
   const {
     status,
     raw,
-  } = await apiPost(url, body);
+  } =
+    await apiPost(
+      url,
+      body
+    );
 
   log(
     status === 200
       ? "success"
       : "error",
 
-    `Inventory +${quantity} on ${productCode}: ${
+    `Inventory +${quantity} on ${productCode} (${warehouseCode}): ${
       status === 200
         ? "OK"
         : "FAILED - " +
-          raw.slice(0, 200)
+          String(
+            raw || ""
+          ).slice(0, 200)
     }`
   );
 
-  return status === 200;
+  return (
+    status === 200
+  );
 }
 
 // --------------------------------------------------
@@ -735,7 +1034,11 @@ async function prefixTitle(
   supplierName
 ) {
   if (
-    product.Name.startsWith("DS ")
+    /^DS\s+/i.test(
+      String(
+        product.Name || ""
+      )
+    )
   ) {
     console.log(
       `      Title already prefixed on ${product.Code}: "${product.Name}" — skipping`
@@ -745,22 +1048,38 @@ async function prefixTitle(
   }
 
   const newName =
-    withDsPrefix(product.Name);
-
-  if (newName.length > 80) {
-    const blockedKey = makeStateKey(
-      "blocked",
-      poNumber,
-      product.Code
+    withDsPrefix(
+      product.Name
     );
+
+  // ------------------------------------------------
+  // TRADEVINE TITLE LIMIT
+  // ------------------------------------------------
+
+  if (
+    newName.length > 80
+  ) {
+    const blockedKey =
+      makeStateKey(
+        "blocked",
+        poNumber,
+        product.Code
+      );
 
     state[blockedKey] = {
       poNumber,
-      supplier: supplierName,
-      reason: "Title exceeds 80 chars",
+
+      supplier:
+        supplierName,
+
+      reason:
+        "Title exceeds 80 chars",
+
       detectedAt:
         new Date().toISOString(),
-      productCode: product.Code,
+
+      productCode:
+        product.Code,
     };
 
     saveState(state);
@@ -780,13 +1099,15 @@ async function prefixTitle(
     status,
     data,
     raw,
-  } = await apiPost(
-    url,
-    {
-      ...product,
-      Name: newName,
-    }
-  );
+  } =
+    await apiPost(
+      url,
+      {
+        ...product,
+        Name:
+          newName,
+      }
+    );
 
   log(
     status === 200
@@ -795,13 +1116,17 @@ async function prefixTitle(
 
     `Title update on ${product.Code}: ${
       status === 200
-        ? `OK — "${data.Name}"`
+        ? `OK — "${data?.Name || newName}"`
         : "FAILED - " +
-          raw.slice(0, 200)
+          String(
+            raw || ""
+          ).slice(0, 200)
     }`
   );
 
-  return status === 200;
+  return (
+    status === 200
+  );
 }
 
 // --------------------------------------------------
@@ -813,11 +1138,13 @@ async function linkChildrenToParent(
   childProductIds
 ) {
   const existing =
-    (parent.BoMComponents || [])
-      .filter(
-        (c) =>
-          c.BoMComponentProductID
-      );
+    (
+      parent.BoMComponents ||
+      []
+    ).filter(
+      (c) =>
+        c.BoMComponentProductID
+    );
 
   const existingIds =
     new Set(
@@ -837,7 +1164,9 @@ async function linkChildrenToParent(
         )
     );
 
-  if (newOnes.length === 0) {
+  if (
+    newOnes.length === 0
+  ) {
     console.log(
       `      BOM link already complete for ${parent.Code}`
     );
@@ -846,18 +1175,26 @@ async function linkChildrenToParent(
   }
 
   const merged = [
-    ...existing.map((c) => ({
-      BoMComponentProductID:
-        c.BoMComponentProductID,
+    ...existing.map(
+      (c) => ({
+        BoMComponentProductID:
+          c.BoMComponentProductID,
 
-      BoMComponentQuantity:
-        c.BoMComponentQuantity || 1,
-    })),
+        BoMComponentQuantity:
+          c.BoMComponentQuantity ||
+          1,
+      })
+    ),
 
-    ...newOnes.map((id) => ({
-      BoMComponentProductID: id,
-      BoMComponentQuantity: 1,
-    })),
+    ...newOnes.map(
+      (id) => ({
+        BoMComponentProductID:
+          id,
+
+        BoMComponentQuantity:
+          1,
+      })
+    ),
   ];
 
   const url =
@@ -866,21 +1203,26 @@ async function linkChildrenToParent(
   const {
     status,
     raw,
-  } = await apiPost(
-    url,
-    merged
-  );
+  } =
+    await apiPost(
+      url,
+      merged
+    );
 
   console.log(
     `      BOM link for ${parent.Code}: ${
       status === 200
         ? "OK"
         : "FAILED - " +
-          raw.slice(0, 200)
+          String(
+            raw || ""
+          ).slice(0, 200)
     }`
   );
 
-  return status === 200;
+  return (
+    status === 200
+  );
 }
 
 // --------------------------------------------------
@@ -888,7 +1230,8 @@ async function linkChildrenToParent(
 // --------------------------------------------------
 
 async function main() {
-  const state = loadState();
+  const state =
+    loadState();
 
   const allPos =
     await getAllAwaitingReceiptPOs();
@@ -897,12 +1240,14 @@ async function main() {
     `Found ${allPos.length} total Awaiting Receipt PO(s) on this account.`
   );
 
-  // --------------------------------------------------
+  // ------------------------------------------------
   // PO CREATION CUTOFF
-  // --------------------------------------------------
+  // ------------------------------------------------
 
   const eligiblePos =
-    allPos.filter(isPOEligible);
+    allPos.filter(
+      isPOEligible
+    );
 
   console.log(
     `PO cutoff: ${AUTOMATION_PO_CUTOFF_DATE}`
@@ -912,24 +1257,28 @@ async function main() {
     `Eligible POs after cutoff: ${eligiblePos.length}`
   );
 
-  // --------------------------------------------------
+  // ------------------------------------------------
   // PROCESS ALL ELIGIBLE POs
-  // --------------------------------------------------
+  // ------------------------------------------------
   //
-  // No single-PO restriction.
+  // There is NO single PO restriction here.
+  //
   // Every Awaiting Receipt PO created on or after
-  // the cutoff date will be processed.
+  // 7 September 2026 is eligible.
   //
-  // Additional safety checks still apply:
-  // - Excluded suppliers
-  // - NZ MADE products
-  // - Real stock > 20
-  // - Failed/unknown real stock checks
-  // - Missing product data
+  // Safety exclusions remain:
   //
-  // --------------------------------------------------
+  // - Parmco Ltd
+  // - NZ MADE
+  // - Real warehouse stock >= 20
+  // - Failed/unknown stock check
+  // - Missing description
+  // - Missing price
+  //
+  // ------------------------------------------------
 
-  const pos = eligiblePos;
+  const pos =
+    eligiblePos;
 
   console.log(
     `Processing ALL eligible POs after cutoff.`
@@ -943,18 +1292,21 @@ async function main() {
     `Will process: ${
       pos
         .map(
-          (p) => p.OrderNumber
+          (p) =>
+            p.OrderNumber
         )
         .join(", ") ||
       "(none matched — check PO status/cutoff)"
     }\n`
   );
 
-  // --------------------------------------------------
-  // PROCESS POS
-  // --------------------------------------------------
+  // ------------------------------------------------
+  // PROCESS POs
+  // ------------------------------------------------
 
-  for (const po of pos) {
+  for (
+    const po of pos
+  ) {
     const poNumber =
       String(
         po.OrderNumber || ""
@@ -963,7 +1315,8 @@ async function main() {
         .toUpperCase();
 
     const supplierName =
-      po.Supplier?.Name || "";
+      po.Supplier?.Name ||
+      "";
 
     // ------------------------------------------------
     // SUPPLIER EXCLUSION
@@ -973,7 +1326,9 @@ async function main() {
       EXCLUDED_SUPPLIERS.some(
         (s) =>
           s.toLowerCase() ===
-          supplierName.toLowerCase()
+          String(
+            supplierName
+          ).toLowerCase()
       )
     ) {
       console.log(
@@ -987,8 +1342,11 @@ async function main() {
       `=== ${poNumber} (Supplier: ${supplierName}) ===`
     );
 
-    const childrenByParent = {};
-    const standalone = [];
+    const childrenByParent =
+      {};
+
+    const standalone =
+      [];
 
     // ------------------------------------------------
     // READ PO PRODUCTS
@@ -996,16 +1354,39 @@ async function main() {
 
     for (
       const line of
-        po.PurchaseOrderLines || []
+        po.PurchaseOrderLines ||
+        []
     ) {
+      const productId =
+        line.productId ||
+        line.ProductID;
+
+      if (!productId) {
+        console.log(
+          "  PO line has no product ID — skipping"
+        );
+
+        continue;
+      }
+
       const {
         data: product,
-      } = await apiGet(
-        `https://api.tradevine.com/v1/Product/${
-          line.productId ||
-          line.ProductID
-        }`
-      );
+      } =
+        await apiGet(
+          `https://api.tradevine.com/v1/Product/${productId}`
+        );
+
+      if (!product) {
+        console.log(
+          `  Product lookup failed for product ${productId} — skipping`
+        );
+
+        continue;
+      }
+
+      // ------------------------------------------------
+      // NZ MADE EXCLUSION
+      // ------------------------------------------------
 
       if (
         isExcludedByTitle(
@@ -1018,6 +1399,40 @@ async function main() {
 
         continue;
       }
+
+      // ------------------------------------------------
+      // IMPORTANT:
+      //
+      // Incoming quantity comes from the PO LINE,
+      // not from the product object.
+      //
+      // This is what allows the new 33% allocation
+      // to work correctly.
+      // ------------------------------------------------
+
+      const incomingQuantity =
+        Number(
+          line.Quantity ??
+            line.quantity ??
+            0
+        );
+
+      if (
+        !Number.isFinite(
+          incomingQuantity
+        ) ||
+        incomingQuantity <= 0
+      ) {
+        console.log(
+          `  ${product.Code}: invalid PO quantity "${line.Quantity}" — skipping`
+        );
+
+        continue;
+      }
+
+      // ------------------------------------------------
+      // BOM CHILD
+      // ------------------------------------------------
 
       if (
         isChildCode(
@@ -1041,9 +1456,19 @@ async function main() {
 
         childrenByParent[
           parentCode
-        ].push(product);
+        ].push({
+          product,
+          incomingQuantity,
+        });
       } else {
-        standalone.push(product);
+        // ------------------------------------------------
+        // STANDALONE
+        // ------------------------------------------------
+
+        standalone.push({
+          product,
+          incomingQuantity,
+        });
       }
     }
 
@@ -1052,9 +1477,10 @@ async function main() {
     // ==================================================
 
     for (
-      const parentCode of Object.keys(
-        childrenByParent
-      )
+      const parentCode of
+        Object.keys(
+          childrenByParent
+        )
     ) {
       console.log(
         `  Parent group: ${parentCode}`
@@ -1069,7 +1495,20 @@ async function main() {
       // CHILDREN
       // ------------------------------------------------
 
-      for (const child of children) {
+      for (
+        const childEntry of
+          children
+      ) {
+        const child =
+          childEntry.product;
+
+        const incomingQuantity =
+          childEntry.incomingQuantity;
+
+        // ----------------------------------------------
+        // PRODUCT DATA
+        // ----------------------------------------------
+
         if (
           blockMissingProductData(
             child,
@@ -1082,7 +1521,30 @@ async function main() {
         }
 
         // ----------------------------------------------
-        // ASSIGN WAREHOUSE FIRST
+        // PRESALE QUANTITY
+        // ----------------------------------------------
+
+        const presaleQuantity =
+          getPresaleQuantity(
+            incomingQuantity
+          );
+
+        console.log(
+          `    ${child.Code}: incoming stock ${incomingQuantity} → presale allocation ${presaleQuantity} (33%)`
+        );
+
+        if (
+          presaleQuantity <= 0
+        ) {
+          console.log(
+            `    ${child.Code}: presale quantity is 0 — skipping`
+          );
+
+          continue;
+        }
+
+        // ----------------------------------------------
+        // ASSIGN WAREHOUSE
         // ----------------------------------------------
 
         const warehouseCode =
@@ -1104,7 +1566,9 @@ async function main() {
             warehouseCode
           );
 
-        if (!stockAllowed) {
+        if (
+          !stockAllowed
+        ) {
           continue;
         }
 
@@ -1119,7 +1583,9 @@ async function main() {
             child.Code
           );
 
-        if (state[invKey]) {
+        if (
+          state[invKey]
+        ) {
           console.log(
             `    ${child.Code}: inventory already added for ${poNumber} — skipping`
           );
@@ -1130,24 +1596,39 @@ async function main() {
         const ok =
           await addInventory(
             child.Code,
-            PRESALE_QTY,
+            presaleQuantity,
             warehouseCode
           );
 
         if (ok) {
           state[invKey] = {
             done: true,
+
             date:
               new Date().toISOString(),
+
             poNumber,
+
             supplier:
-              supplierName || null,
+              supplierName ||
+              null,
+
             productCode:
               child.Code,
+
             warehouseCode,
+
+            incomingQuantity,
+
+            presaleQuantity,
+
+            presalePercentage:
+              PRESALE_PERCENTAGE,
           };
 
-          saveState(state);
+          saveState(
+            state
+          );
         }
       }
 
@@ -1194,28 +1675,39 @@ async function main() {
           parentCode
         );
 
-      if (!state[bomKey]) {
+      if (
+        !state[bomKey]
+      ) {
         const ok =
           await linkChildrenToParent(
             parent,
             children.map(
-              (c) => c.ProductID
+              (entry) =>
+                entry.product
+                  .ProductID
             )
           );
 
         if (ok) {
           state[bomKey] = {
             done: true,
+
             date:
               new Date().toISOString(),
+
             poNumber,
+
             supplier:
-              supplierName || null,
+              supplierName ||
+              null,
+
             productCode:
               parentCode,
           };
 
-          saveState(state);
+          saveState(
+            state
+          );
         }
       } else {
         console.log(
@@ -1234,7 +1726,9 @@ async function main() {
           parentCode
         );
 
-      if (!state[titleKey]) {
+      if (
+        !state[titleKey]
+      ) {
         const freshParent =
           await getProductByCode(
             parentCode
@@ -1259,16 +1753,23 @@ async function main() {
         if (ok) {
           state[titleKey] = {
             done: true,
+
             date:
               new Date().toISOString(),
+
             poNumber,
+
             supplier:
-              supplierName || null,
+              supplierName ||
+              null,
+
             productCode:
               parentCode,
           };
 
-          saveState(state);
+          saveState(
+            state
+          );
         }
       } else {
         console.log(
@@ -1281,13 +1782,22 @@ async function main() {
     // STANDALONE PRODUCTS
     // ==================================================
 
-    for (const product of standalone) {
+    for (
+      const productEntry of
+        standalone
+    ) {
+      const product =
+        productEntry.product;
+
+      const incomingQuantity =
+        productEntry.incomingQuantity;
+
       console.log(
         `  Standalone: ${product.Code}`
       );
 
       // ------------------------------------------------
-      // DATA CHECK
+      // PRODUCT DATA
       // ------------------------------------------------
 
       if (
@@ -1298,6 +1808,29 @@ async function main() {
           supplierName
         )
       ) {
+        continue;
+      }
+
+      // ------------------------------------------------
+      // PRESALE QUANTITY
+      // ------------------------------------------------
+
+      const presaleQuantity =
+        getPresaleQuantity(
+          incomingQuantity
+        );
+
+      console.log(
+        `    ${product.Code}: incoming stock ${incomingQuantity} → presale allocation ${presaleQuantity} (33%)`
+      );
+
+      if (
+        presaleQuantity <= 0
+      ) {
+        console.log(
+          `    ${product.Code}: presale quantity is 0 — skipping`
+        );
+
         continue;
       }
 
@@ -1324,7 +1857,9 @@ async function main() {
           warehouseCode
         );
 
-      if (!stockAllowed) {
+      if (
+        !stockAllowed
+      ) {
         continue;
       }
 
@@ -1339,32 +1874,49 @@ async function main() {
           product.Code
         );
 
-      if (!state[invKey]) {
+      if (
+        !state[invKey]
+      ) {
         const ok =
           await addInventory(
             product.Code,
-            PRESALE_QTY,
+            presaleQuantity,
             warehouseCode
           );
 
         if (ok) {
           state[invKey] = {
             done: true,
+
             date:
               new Date().toISOString(),
+
             poNumber,
+
             supplier:
-              supplierName || null,
+              supplierName ||
+              null,
+
             productCode:
               product.Code,
+
             warehouseCode,
+
+            incomingQuantity,
+
+            presaleQuantity,
+
+            presalePercentage:
+              PRESALE_PERCENTAGE,
           };
 
-          saveState(state);
+          saveState(
+            state
+          );
         }
       } else {
         console.log(
-          `    Inventory already added for ${poNumber} — skipping`
+          `    ${product.Code}: inventory already added for ${poNumber} — skipping`
         );
       }
 
@@ -1379,7 +1931,9 @@ async function main() {
           product.Code
         );
 
-      if (!state[titleKey]) {
+      if (
+        !state[titleKey]
+      ) {
         const ok =
           await prefixTitle(
             product,
@@ -1391,16 +1945,23 @@ async function main() {
         if (ok) {
           state[titleKey] = {
             done: true,
+
             date:
               new Date().toISOString(),
+
             poNumber,
+
             supplier:
-              supplierName || null,
+              supplierName ||
+              null,
+
             productCode:
               product.Code,
           };
 
-          saveState(state);
+          saveState(
+            state
+          );
         }
       } else {
         console.log(
@@ -1412,7 +1973,9 @@ async function main() {
     console.log("");
   }
 
-  saveState(state);
+  saveState(
+    state
+  );
 
   console.log(
     "Done. State saved to",
@@ -1424,9 +1987,13 @@ async function main() {
 // START
 // --------------------------------------------------
 
-main().catch((err) => {
-  console.error(
-    "SCRIPT CRASHED:",
-    err
-  );
-});
+main().catch(
+  (err) => {
+    console.error(
+      "SCRIPT CRASHED:",
+      err
+    );
+
+    process.exit(1);
+  }
+);

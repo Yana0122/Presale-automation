@@ -48,7 +48,35 @@ const token = {
 
 const { getOrAssignWarehouse } = require("../AKL/warehouse-assignment");
 
-const PRESALE_QTY = 20;
+// --------------------------------------------------
+// PRESALE ALLOCATION
+// --------------------------------------------------
+//
+// 33% of incoming PO stock.
+// Rounded UP.
+//
+// Examples:
+// 1  -> 1
+// 2  -> 1
+// 3  -> 1
+// 4  -> 2
+// 10 -> 4
+// 20 -> 7
+// 50 -> 17
+//
+// --------------------------------------------------
+
+const PRESALE_PERCENTAGE = 0.33;
+
+function getPresaleQuantity(incomingQuantity) {
+  const quantity = Number(incomingQuantity);
+
+  if (!Number.isFinite(quantity) || quantity <= 0) {
+    return 0;
+  }
+
+  return Math.ceil(quantity * PRESALE_PERCENTAGE);
+}
 
 // --------------------------------------------------
 // CHCH STATE FILE
@@ -71,6 +99,16 @@ const EXCLUDED_SUPPLIERS = ["Parmco Ltd"];
 // --------------------------------------------------
 // REAL STOCK SETTINGS
 // --------------------------------------------------
+//
+// If ANY real warehouse/aisle has stock >= 20,
+// presale is blocked.
+//
+// If ALL real warehouse/aisle stock is below 20,
+// presale is allowed.
+//
+// Unknown stock = blocked for safety.
+//
+// --------------------------------------------------
 
 const STOCK_THRESHOLD = 20;
 
@@ -79,17 +117,29 @@ const STOCK_RECHECK_DAYS = 7;
 const STOCK_RECHECK_MS =
   STOCK_RECHECK_DAYS * 24 * 60 * 60 * 1000;
 
-// Valid real warehouse / aisle format:
+// --------------------------------------------------
+// VALID REAL WAREHOUSE / AISLE FORMAT
+// --------------------------------------------------
+//
+// Examples:
 //
 // 5-36-A-1
 // 4-35-A-3
 // 12-10-B-4
 //
+// --------------------------------------------------
+
 const REAL_AISLE_REGEX =
   /^\d{1,2}-\d{1,2}-[A-Za-z]-\d{1,2}$/;
 
 // --------------------------------------------------
 // PO CREATION CUTOFF
+// --------------------------------------------------
+//
+// Only POs created ON or AFTER this date are eligible.
+//
+// POs created before this date are skipped.
+//
 // --------------------------------------------------
 
 const AUTOMATION_PO_CUTOFF_DATE = "2026-09-07";
@@ -129,9 +179,6 @@ function isPOEligible(po) {
 
   return true;
 }
-
-// // Keep restricted while testing.
-// const ALLOWED_PO_NUMBERS = ["PO1589"];
 
 // --------------------------------------------------
 // STATE
@@ -394,10 +441,7 @@ function blockMissingProductData(
 // If blocked because stock >= 20,
 // check again after 7 days.
 //
-// IMPORTANT:
-// nextCheckAt only records when the next check is due.
-// The script itself must run again after that time.
-//
+// ==================================================
 
 function getStockBlockKey(
   poNumber,
@@ -1136,7 +1180,9 @@ async function processBomParent(
     `    Checking real stock for all BOM children before processing ${parentCode}...`
   );
 
-  for (const child of children) {
+  for (const childEntry of children) {
+    const child = childEntry.product;
+
     const stockAllowed =
       await checkRealStockBeforePresale(
         child,
@@ -1164,7 +1210,9 @@ async function processBomParent(
   // CHECK CHILD PRODUCT DATA
   // ------------------------------------------------
 
-  for (const child of children) {
+  for (const childEntry of children) {
+    const child = childEntry.product;
+
     if (
       blockMissingProductData(
         child,
@@ -1185,7 +1233,31 @@ async function processBomParent(
   // ADD CHILD INVENTORY
   // ------------------------------------------------
 
-  for (const child of children) {
+  for (const childEntry of children) {
+    const child = childEntry.product;
+
+    const incomingQuantity =
+      childEntry.incomingQuantity;
+
+    const presaleQuantity =
+      getPresaleQuantity(
+        incomingQuantity
+      );
+
+    console.log(
+      `    ${child.Code}: incoming stock ${incomingQuantity} -> presale quantity ${presaleQuantity} (33%)`
+    );
+
+    if (
+      presaleQuantity <= 0
+    ) {
+      console.log(
+        `    ${child.Code}: INVALID incoming quantity ${incomingQuantity} — skipping presale inventory`
+      );
+
+      continue;
+    }
+
     if (
       hasInventoryForCycle(
         child.Code,
@@ -1209,7 +1281,7 @@ async function processBomParent(
     const ok =
       await addInventory(
         child.Code,
-        PRESALE_QTY,
+        presaleQuantity,
         warehouseCode
       );
 
@@ -1229,6 +1301,8 @@ async function processBomParent(
         new Date().toISOString(),
       supplier:
         supplierName || null,
+      incomingQuantity,
+      presaleQuantity,
     };
 
     saveState(state);
@@ -1335,6 +1409,7 @@ async function processBomParent(
 
 async function processStandaloneProduct(
   product,
+  incomingQuantity,
   po,
   state
 ) {
@@ -1344,9 +1419,32 @@ async function processStandaloneProduct(
   const supplierName =
     po.Supplier?.Name || "";
 
+  const presaleQuantity =
+    getPresaleQuantity(
+      incomingQuantity
+    );
+
   console.log(
     `  Standalone: ${product.Code}`
   );
+
+  console.log(
+    `    Incoming stock: ${incomingQuantity}`
+  );
+
+  console.log(
+    `    Presale allocation: ${presaleQuantity} (33%)`
+  );
+
+  if (
+    presaleQuantity <= 0
+  ) {
+    console.log(
+      `    ${product.Code}: INVALID incoming quantity ${incomingQuantity} — skipping presale inventory`
+    );
+
+    return;
+  }
 
   // ------------------------------------------------
   // REAL STOCK CHECK FIRST
@@ -1406,7 +1504,7 @@ async function processStandaloneProduct(
     const ok =
       await addInventory(
         product.Code,
-        PRESALE_QTY,
+        presaleQuantity,
         warehouseCode
       );
 
@@ -1417,6 +1515,8 @@ async function processStandaloneProduct(
           new Date().toISOString(),
         supplier:
           supplierName || null,
+        incomingQuantity,
+        presaleQuantity,
       };
 
       saveState(state);
@@ -1556,10 +1656,12 @@ async function main() {
   // ------------------------------------------------
   //
   // No single-PO restriction.
+  //
   // Every Awaiting Receipt PO created on or after
   // the cutoff date will be processed.
   //
   // Additional safety checks still apply:
+  //
   // - Excluded suppliers
   // - NZ MADE products
   // - Real stock >= 20
@@ -1568,7 +1670,8 @@ async function main() {
   //
   // ------------------------------------------------
 
-  const pos = eligiblePos;
+  const pos =
+    eligiblePos;
 
   console.log(
     `Processing ALL eligible POs after cutoff.`
@@ -1659,6 +1762,10 @@ async function main() {
       const product =
         result.data;
 
+      // ------------------------------------------------
+      // EXCLUDE NZ MADE
+      // ------------------------------------------------
+
       if (
         isExcludedByTitle(
           product.Name
@@ -1670,6 +1777,10 @@ async function main() {
 
         continue;
       }
+
+      // ------------------------------------------------
+      // BOM CHILD
+      // ------------------------------------------------
 
       if (
         isChildCode(
@@ -1693,11 +1804,25 @@ async function main() {
 
         childrenByParent[
           parentCode
-        ].push(product);
+        ].push({
+          product,
+          incomingQuantity:
+            Number(
+              line.Quantity
+            ),
+        });
       } else {
-        standalone.push(
-          product
-        );
+        // ------------------------------------------------
+        // STANDALONE PRODUCT
+        // ------------------------------------------------
+
+        standalone.push({
+          product,
+          incomingQuantity:
+            Number(
+              line.Quantity
+            ),
+        });
       }
     }
 
@@ -1755,23 +1880,24 @@ async function main() {
     // ------------------------------------------------
 
     for (
-      const product of
+      const productEntry of
         standalone
     ) {
       try {
         await processStandaloneProduct(
-          product,
+          productEntry.product,
+          productEntry.incomingQuantity,
           po,
           state
         );
       } catch (err) {
         console.error(
-          `${product.Code}: ERROR — ${err.message}`
+          `${productEntry.product.Code}: ERROR — ${err.message}`
         );
 
         log(
           "error",
-          `${product.Code}: ${err.message}`
+          `${productEntry.product.Code}: ${err.message}`
         );
       }
     }

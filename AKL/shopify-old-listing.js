@@ -605,6 +605,129 @@ async function getBaseProductPhoto(
 }
 
 // --------------------------------------------------
+// VALIDATE TRADEVINE PRODUCT INFORMATION
+// --------------------------------------------------
+//
+// Weight must be populated on the main Tradevine
+// Product Information page before the product can
+// be listed on Shopify.
+//
+// Current requirement:
+// Weight must exist and be greater than 0.
+//
+// Example:
+//
+// Specifications
+//
+// Weight 500g
+// Length 1200mm
+// Width 600mm
+// Height 800mm
+// Volume 0.1734m³
+//
+// Only Weight is mandatory at this stage.
+// --------------------------------------------------
+
+async function validateTradevineProductInformation(
+  shopifyProduct,
+  productCode
+) {
+  const productId =
+    shopifyProduct.ProductID ||
+    shopifyProduct.ProductId ||
+    shopifyProduct.productId ||
+    null;
+
+  if (!productId) {
+    console.log(
+      `  ${productCode}: BLOCKED — ProductID not available for Tradevine product information check`
+    );
+
+    return {
+      ok: false,
+      missing: ["weight"],
+      reason: "product_id_missing",
+    };
+  }
+
+  const url =
+    `${TV_API}/v1/Product/${productId}`;
+
+  const result =
+    await apiGet(url);
+
+  if (
+    result.status !== 200 ||
+    !result.data
+  ) {
+    console.log(
+      `  ${productCode}: BLOCKED — could not retrieve Tradevine product information`
+    );
+
+    console.log(
+      `  Tradevine response:`,
+      result.status,
+      result.raw?.slice(0, 300)
+    );
+
+    return {
+      ok: false,
+      missing: ["weight"],
+      reason:
+        "tradevine_product_lookup_failed",
+    };
+  }
+
+  const product =
+    result.data;
+
+  // --------------------------------------------------
+  // CHECK WEIGHT
+  // --------------------------------------------------
+
+  const rawWeight =
+    product.Weight ??
+    product.weight ??
+    null;
+
+  const weight =
+    Number(rawWeight);
+
+  if (
+    rawWeight === null ||
+    rawWeight === undefined ||
+    String(rawWeight).trim() === "" ||
+    Number.isNaN(weight) ||
+    weight <= 0
+  ) {
+    console.log(
+      `  ${productCode}: BLOCKED — Tradevine Weight is missing or invalid`
+    );
+
+    console.log(
+      `  ${productCode}: Weight returned = "${rawWeight}"`
+    );
+
+    return {
+      ok: false,
+      missing: ["weight"],
+      reason:
+        "weight_missing_or_invalid",
+      weight: rawWeight,
+    };
+  }
+
+  console.log(
+    `  ${productCode}: Tradevine Weight ✓ (${rawWeight})`
+  );
+
+  return {
+    ok: true,
+    weight: rawWeight,
+  };
+}
+
+// --------------------------------------------------
 // SAVE SHOPIFY PRODUCT TAB
 // --------------------------------------------------
 
@@ -952,6 +1075,51 @@ async function listExistingProductOnShopify(
   console.log(
     `  ${productCode}: image ✓`
   );
+
+  // --------------------------------------------------
+// TRADEVINE PRODUCT INFORMATION CHECK
+// --------------------------------------------------
+//
+// Weight must be populated on the main Tradevine
+// Product Information page before the product can
+// be listed on Shopify.
+//
+// This is intentionally checked before:
+// - tags are saved
+// - final reload
+// - IsListedOnShopify = true
+// - shopify-listed state is recorded
+// --------------------------------------------------
+
+const tradevineProductValidation =
+  await validateTradevineProductInformation(
+    shopifyProduct,
+    productCode
+  );
+
+if (!tradevineProductValidation.ok) {
+  console.log(
+    `  ${productCode}: BLOCKED — Tradevine Product Information is incomplete`
+  );
+
+  console.log(
+    `  ${productCode}: Weight must be populated before Shopify listing`
+  );
+
+  return {
+    ok: false,
+    reason:
+      "tradevine_product_information_validation_failed",
+    missing:
+      tradevineProductValidation.missing,
+    productCode,
+    poNumber,
+  };
+}
+
+console.log(
+  `  ${productCode}: Tradevine Product Information ✓`
+);
 
   // --------------------------------------------------
   // TAGS
@@ -1313,6 +1481,7 @@ module.exports = {
   getShopifyListingStateKey,
   buildTags,
   validateShopifyFields,
+  validateTradevineProductInformation,
   addDSToTitle,
   isChildProduct,
 };
